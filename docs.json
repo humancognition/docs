@@ -25,7 +25,7 @@
             "group": "Core Concepts",
             "pages": [
               "concepts/how-it-works",
-              "concepts/cognitive-foundations.mdx",
+              "concepts/cognitive-foundations",
               "concepts/modes",
               "concepts/language-levels",
               "concepts/self-recovery"

@@ -2,5 +2,94 @@
 title: "Cognitive Science Foundations of HCE"
 sidebarTitle: "Cognitive Foundations"
 description: "HCE's design is grounded in three results from cognitive psychology and information theory: Cowan's working-memory limit, Baddeley's phonological loop, and Shannon's channel capacity."
-url: "concepts/cognitive-foundations"
 ---
+
+HCE is not just a re-encoding of UUIDs. Every structural choice — syllable shape, chunk count, character pool size, output length — is anchored to a specific finding about how humans store, rehearse, and transmit short strings. This page collects those findings in one place so the rest of the documentation can refer back to them.
+
+The short version: humans hold **4±1 chunks** in working memory (Cowan), rehearse them through an **inner-speech loop** (Baddeley), and any encoding scheme is bounded by **channel capacity** (Shannon). HCE is the smallest design that respects all three at once.
+
+## Cowan's 4±1: Why HCE Targets Four Chunks
+
+Nelson Cowan's 2001 meta-analysis showed that adult working memory holds roughly **3–5 discrete units** — not seven, as Miller's earlier "7±2" estimate suggested. The critical word is _units_. A unit (or _chunk_) can be a single digit, a word, or an entire familiar phrase; what matters is that the brain treats it as one indivisible item.
+
+A raw UUID hex string —
+
+```text
+f81d4fae-7dec-11d0-a765-00a0c91e6bf6
+```
+
+— is 32 hex characters. Read one character at a time, that is **32 chunks**, an order of magnitude above the working-memory ceiling. The hyphens help, but the resulting five chunks of 8/4/4/4/12 characters are still individually too long to rehearse as single units.
+
+HCE flips the budget. The output is sized so it lands in **exactly four chunks** of roughly three syllables each:
+
+```text
+KONBLA-TRESKO-MILDAP-RUNBES
+```
+
+Four chunks sits in the middle of Cowan's 3–5 band, leaving headroom for the listener's own context (the speaker's name, the surrounding sentence, the room's noise floor). Crucially, HCE achieves four chunks **deterministically**, not probabilistically — the boundaries are derived from ciphertext bits, so every identifier hits the same count without spending any entropy on the choice. See [Chunking](/configuration/chunking) for the algorithm.
+
+<Tip>
+  The point of four chunks is not aesthetics. It is the difference between a listener writing down an identifier correctly on the first try and asking the speaker to repeat themselves.
+</Tip>
+
+## Baddeley's Phonological Loop: Why HCE is Pronounceable
+
+Alan Baddeley's working-memory model identifies a dedicated subsystem — the **phonological loop** — that stores verbal information by silently rehearsing it as inner speech. The loop has two consequences that shape HCE directly.
+
+**Consequence 1: unpronounceable strings decay fast.** When the loop cannot convert a string into inner speech, rehearsal collapses and the item is lost within about two seconds. A run of consonants like `xkfzqp` triggers _articulatory suppression_ — the speaker's articulators stall, and the chunk dies before it reaches long-term storage. HCE never produces such runs because its [syllable model](/concepts/how-it-works) alternates onset and vowel-nucleus positions: every onset (single consonant or cluster) is immediately followed by a vowel, with an optional soft coda (`n`, `l`, or `r`). The structure makes every output pronounceable by construction, not by post-hoc filtering.
+
+**Consequence 2: pronounceable strings rehearse longer.** When a string flows naturally through the loop, it stays available for verbal transmission, hand-transcription, and short-term recall. HCE additionally uses the **Sonority Sequencing Principle** to choose which consonant clusters appear: only clusters whose sonority profile rises smoothly toward the vowel (`tr`, `bl`, `pr`) are admitted. The result is words that feel like words — `TRELPOL`, `KONBLA`, `MILDAP` — even though their underlying bits are uniformly random ciphertext.
+
+This is also why HCE's [self-recovery](/concepts/self-recovery) is built around a **phoneme confusion matrix** rather than a generic edit distance. The errors humans make when rehearsing in the phonological loop are not random: they cluster along articulatory features (`m`↔`n`, `b`↔`v`, `l`↔`r`). HCE corrects exactly those errors.
+
+## Shannon's Channel Capacity: Why HCE Compresses to ~31 Characters
+
+Claude Shannon's 1948 information theory establishes a hard ceiling: a channel can carry at most `log2(N)` bits per symbol, where `N` is the alphabet size. Going below that ceiling is fine; trying to exceed it is impossible without losing information.
+
+HCE's syllable model uses two alternating positions:
+
+| Position | Pool size | Bits/symbol |
+| --- | --- | --- |
+| Onset | 29 | log₂(29) ≈ 4.86 |
+| Vowel-nucleus (VNUC) | 20 | log₂(20) ≈ 4.32 |
+
+One full syllable (onset \+ VNUC) therefore carries `log2(29 × 20) = log2(580) ≈ 9.18 bits`. To encode a 128-bit UUID losslessly, the minimum number of syllables is:
+
+```text
+ceil(128 / 9.18) = 14 syllables
+```
+
+Fourteen syllables, rendered as roughly 31 characters, is **the Shannon-optimal length** for HCE's chosen pool. Shorter outputs are mathematically impossible without dropping bits; longer outputs would waste the listener's working-memory budget.
+
+<Note>
+  HCE's information density is approximately **9.2 bits per syllable**, compared to UUID hex's 4 bits per character and BIP-39's 11 bits per word. HCE sits in a sweet spot: dense enough to stay short, sparse enough to chunk into four working-memory units.
+</Note>
+
+### Comparison to other identifier formats
+
+| Format | Bits per unit | 128-bit length | Cognitive units |
+| --- | --- | --- | --- |
+| UUID hex | 4 bits/char | 32 chars | 32 (overflows) |
+| BIP-39 | 11 bits/word | 12 words | 12 (overflows) |
+| Proquint | ~3.2 bits/char | 40 chars | 8 (overflows) |
+| **HCE v2** | **~9.2 bits/syllable** | **~31 chars** | **4 (fits)** |
+
+BIP-39 packs more bits per word, but twelve words is three times Cowan's ceiling — it is optimized for written backup, not for speaking. HCE optimizes for the channel humans actually use most often: their voice and their hands.
+
+## How the Three Principles Compose
+
+The three findings are not independent constraints; they reinforce each other.
+
+1. **Shannon** sets the minimum output length (14 syllables ≈ 31 characters) for a chosen alphabet.
+2. **Cowan** sets the maximum number of chunks (4±1) that length can be partitioned into.
+3. **Baddeley** sets the internal shape of each chunk (alternating consonant–vowel positions, sonority-respecting clusters, soft codas) so that each chunk survives the phonological loop.
+
+Remove any one and the design collapses: ignore Shannon and you get arbitrary-length output, ignore Cowan and you get unspeakable strings, ignore Baddeley and you get unpronounceable noise. HCE is the intersection.
+
+## Further Reading
+
+- Cowan, N. (2001). _The magical number 4 in short-term memory: A reconsideration of mental storage capacity._ Behavioral and Brain Sciences, 24(1), 87–114.
+- Baddeley, A. (2000). _The episodic buffer: a new component of working memory?_ Trends in Cognitive Sciences, 4(11), 417–423.
+- Shannon, C. E. (1948). _A Mathematical Theory of Communication._ Bell System Technical Journal, 27, 379–423 and 623–656.
+- Meyer, J. (2007). _Acoustic features and perceptive cues of songs and dialogues in whistled speech._ (Used for HCE's phoneme confusion matrix.)
+- See also: [How It Works](/concepts/how-it-works), [Self-Recovery](/concepts/self-recovery), [Chunking](/configuration/chunking).
