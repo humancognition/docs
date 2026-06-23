@@ -1,0 +1,132 @@
+---
+title: "Embedding Timestamps in HCE Encoded Identifiers"
+sidebarTitle: "Timestamps"
+description: "Use HCE's Open mode with timestamp configuration to produce lexicographically sortable encoded identifiers, ideal for distributed ID generation."
+---
+
+HCE's Open mode can prefix every encoded identifier with a timestamp derived from a configurable reference epoch, making the resulting strings lexicographically sortable by creation time. This is particularly useful in distributed systems where you need globally unique, human-readable IDs that also carry ordering guarantees — without a centralised sequence generator. The timestamp occupies the leading syllables of the output, so a simple string sort is equivalent to a chronological sort.
+
+## How timestamp prefixing works
+
+When you call `with_timestamp_config`, you provide two values:
+
+- **`epoch_ms`** — your application's reference epoch in Unix milliseconds. All timestamps are encoded as offsets from this value, which lets you maximise the useful range of the prefix for your deployment era.
+- **`granularity`** — how finely to encode time. Coarser granularity means fewer syllables are consumed by the prefix, leaving more room in the output for the encrypted payload; finer granularity provides tighter ordering at the cost of more prefix syllables.
+
+The prefix is always two syllables in the form `K<V>-R<V>` (e.g. `KA-RE`), where each vowel represents a time bucket offset from your epoch at the chosen granularity.
+
+## Granularity options
+
+| Granularity | Typical Use |
+|---|---|
+| `Second` | High-throughput IDs — e.g. event streams, IoT telemetry |
+| `Minute` | Most web and API applications |
+| `Hour` | Low-frequency IDs — e.g. batch jobs, scheduled tasks |
+| `Day` | Date-keyed records — e.g. daily reports, audit logs |
+| `Week` | Weekly batch IDs — e.g. subscription billing cycles |
+| `Month` | Monthly rollup IDs — e.g. invoices, statement periods |
+
+## Rust example
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel, TsGranularity};
+
+let key = b"32-byte-secret-key-here-xxxxxx!!";
+
+let hce = Hce::new(Some(key), LanguageLevel::Universal, HceMode::Open)
+    .with_timestamp_config(1_700_000_000_000_i64, TsGranularity::Second);
+
+let id = hce.encode(&uuid_bytes);
+// The first syllables encode the timestamp prefix, e.g.:
+// => "KA-RE-PETREN-NISLORPEN-LAFLER"
+//      ^^^^^ timestamp prefix
+
+// Decoding strips the prefix and recovers the original bytes
+let bytes = hce.decode(&id).unwrap();
+```
+
+The `epoch_ms` value `1_700_000_000_000` corresponds to 2023-11-14 22:13:20 UTC — a common choice for applications launched around that period that want small initial offset values.
+
+<Note>
+Timestamp prefixing only works in `Open` mode. `Sealed` mode does not prepend a timestamp, and configuring `with_timestamp_config` on a `Sealed` or `Plain` instance has no effect on the output.
+</Note>
+
+## Sorting by timestamp
+
+Because HCE uses consistent phoneme encoding, two identifiers produced by the same configuration can be sorted lexicographically (case-insensitively) to recover chronological order:
+
+```rust
+let mut ids: Vec<String> = events
+    .iter()
+    .map(|e| hce.encode(&e.id_bytes))
+    .collect();
+
+// Lexicographic sort == chronological sort when using Open mode with timestamps
+ids.sort();
+```
+
+## Python equivalent
+
+```python
+import hce
+
+h = hce.Hce(
+    key=b"32-byte-secret-key-here-xxxxxx!!",
+    level="universal",
+    mode="open",
+).with_timestamp_config(1_700_000_000_000, "second")
+
+id_str = h.encode(uuid_bytes)
+# => "KA-RE-PETREN-NISLORPEN-LAFLER"
+
+original = h.decode(id_str)
+```
+
+The `granularity` argument is a lowercase string: `"second"`, `"minute"`, `"hour"`, `"day"`, `"week"`, or `"month"`.
+
+## CLI equivalent
+
+```bash
+hce encode \
+  --mode open \
+  --timestamp-epoch 1700000000000 \
+  --timestamp-granularity second \
+  --key <hex-key> \
+  <hex-input>
+```
+
+You can verify sorting behaviour by encoding the same payload at two different times and comparing the outputs:
+
+```bash
+# Encode now
+hce encode --mode open --timestamp-epoch 1700000000000 \
+  --timestamp-granularity minute --key <hex-key> <hex-input>
+
+# Encode one minute later — the leading prefix syllables will differ
+hce encode --mode open --timestamp-epoch 1700000000000 \
+  --timestamp-granularity minute --key <hex-key> <hex-input>
+```
+
+## UUID adapter and UUIDv7
+
+<Tip>
+When working with UUIDv7 identifiers, use the `UuidAdapter` from `hce-adapters` together with Open mode. The adapter automatically extracts the 48-bit millisecond timestamp embedded in the UUIDv7 structure, so HCE can use the identifier's own creation time as the prefix source — no separate `with_timestamp_config` call required.
+</Tip>
+
+```rust
+use hce_adapters::{HceCodec, UuidAdapter};
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Open,
+);
+
+// UuidAdapter extracts the UUIDv7 timestamp automatically
+let codec = HceCodec::new(hce, UuidAdapter);
+
+let encoded = codec.encode(&uuid_v7_bytes);
+// Timestamp prefix is derived from the UUID's embedded timestamp
+let decoded = codec.decode(&encoded).unwrap();
+```

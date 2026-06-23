@@ -1,0 +1,82 @@
+---
+title: "HCE Adapters: Encode Typed Identifiers Directly"
+sidebarTitle: "Overview"
+description: "hce-adapters provides type-specific wrappers for UUID, ULID, Snowflake, ObjectId, and Xid so you can encode identifiers without manual byte wrangling."
+---
+
+The `hce-adapters` crate provides type-specific wrappers — called adapters — for common identifier formats so you don't have to manually convert them to bytes before encoding. Each adapter knows the byte layout and bit width of its identifier type, and many can automatically extract an embedded timestamp to enable lexicographically sortable output with `HceMode::Open`.
+
+## Available Adapters
+
+| Adapter | Type | Notes |
+|---|---|---|
+| `UuidAdapter` | UUID (v1, v4, v6, v7) | Extracts timestamp from v1/v6/v7 |
+| `UlidAdapter` | ULID | 26-char base32 → 128-bit |
+| `SnowflakeAdapter` | Snowflake (Twitter/Discord style) | 64-bit integer |
+| `ObjectIdAdapter` | MongoDB ObjectId | 12-byte |
+| `XidAdapter` | Xid | 12-byte |
+| `RawAdapter` | Arbitrary bytes | Specify `bit_width` manually |
+
+## Using HceCodec
+
+`HceCodec<A: Adapter>` wraps an `Hce` instance together with an adapter. Constructing a codec automatically configures the underlying `Hce` with the adapter's `bit_width`, so you never need to call `with_bit_width` yourself.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+use hce_adapters::{HceCodec, UuidAdapter};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+);
+
+let codec = HceCodec::new(hce, UuidAdapter);
+
+let uuid_bytes: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+
+let encoded = codec.encode(&uuid_bytes);
+let decoded = codec.decode(&encoded).unwrap();
+```
+
+`encode` passes your raw bytes through the adapter's `to_bytes` normalisation step, then delegates to the underlying `Hce` encoder. `decode` is the exact inverse and returns `Result<Vec<u8>, HceError>`.
+
+## The Adapter Trait
+
+If none of the built-in adapters fit your identifier format, you can implement `Adapter` directly. The trait is straightforward:
+
+```rust
+pub trait Adapter: Send + Sync {
+    fn bit_width(&self) -> u32;
+    fn to_bytes(&self, id: &[u8]) -> Vec<u8>;
+    fn parse_bytes(&self, bytes: &[u8]) -> Vec<u8>;
+    fn has_timestamp(&self) -> bool;
+    fn extract_timestamp(&self, bytes: &[u8]) -> Option<i64>;
+}
+```
+
+| Method | Purpose |
+|---|---|
+| `bit_width` | The canonical bit width of the identifier (16–128). Used to configure the codec. |
+| `to_bytes` | Normalises raw input bytes into a fixed-length buffer before encoding. |
+| `parse_bytes` | Post-processes decoded bytes back into the identifier's native representation. |
+| `has_timestamp` | Returns `true` when the identifier embeds a sortable timestamp. |
+| `extract_timestamp` | Extracts a Unix millisecond timestamp from the identifier's bytes, or `None`. |
+
+<Tip>
+  When `has_timestamp` returns `true`, combine your adapter with `HceMode::Open` to produce
+  lexicographically sortable encoded strings. HCE prepends the extracted timestamp as the first
+  syllable group, so encoded IDs sort in the same order as their creation time.
+</Tip>
+
+## Installation
+
+Add `hce-adapters` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+hce-adapters = "0.1"
+```

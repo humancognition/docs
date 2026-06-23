@@ -1,0 +1,170 @@
+---
+title: "Configuring HCE Output Chunking and Separators"
+sidebarTitle: "Chunking"
+description: "Control how HCE breaks encoded strings into readable segments using natural grouping, fixed sizes, or custom syllable-count patterns."
+---
+
+By default, HCE groups syllables into natural-feeling chunks separated by hyphens — for example, `PETREN-NISLORPEN-LAFLER`. You can override this behaviour with one of three explicit chunking strategies and, independently, swap the separator character for any symbol that does not conflict with the phoneme alphabet. These two knobs let you tune output for human readability, URL safety, database storage, or any other downstream constraint.
+
+## Chunking strategies
+
+The four strategies below are mutually exclusive. Set whichever one fits your use case; the last call wins.
+
+| Strategy | Method | Description |
+|---|---|---|
+| Natural (default) | `with_chunk_spec(ChunkSpec::natural_with_separator('-'))` | Groups syllables into word-like chunks using a built-in heuristic, separated by hyphens |
+| None | `with_chunk_none()` | Produces a single continuous string with no separators |
+| Fixed | `with_chunk_fixed(n)` | Inserts a separator after every *n* syllables |
+| Pattern | `with_chunk_pattern(&[3, 4, 4, 3])` | Applies a repeating cycle of custom syllable counts per chunk |
+
+### Natural chunking
+
+Natural chunking is active by default. You can make it explicit — and change the separator — without any other configuration changes.
+
+```rust
+use hce_core::{ChunkSpec, Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+)
+.with_chunk_spec(ChunkSpec::natural_with_separator('-'));
+
+let id = hce.encode(&uuid_bytes);
+// => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+```
+
+### No chunking
+
+Pass `with_chunk_none()` to remove all separators and emit a single unbroken string.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+)
+.with_chunk_none();
+
+let id = hce.encode(&uuid_bytes);
+// => "PETRENNISLORPENLAFLERSR0RGULGOLFUNPREPLEN"
+```
+
+<Tip>
+Use `with_chunk_none()` when persisting HCE strings in a database. The absence of separator characters reduces storage size and eliminates the need for any separator-stripping logic when indexing or querying the column.
+</Tip>
+
+### Fixed chunking
+
+`with_chunk_fixed(n)` places a separator after every *n* syllables regardless of natural word boundaries.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+)
+.with_chunk_fixed(4);
+
+let id = hce.encode(&uuid_bytes);
+// => "PETRNISLO-RPENLAFL-ERSROR-GULGO"  (4 syllables per chunk)
+```
+
+### Pattern chunking
+
+`with_chunk_pattern` accepts a slice of syllable counts. HCE cycles through the pattern until all syllables are placed. This is useful when you want the output to mimic a specific structure — such as a passphrase word count or a branded identifier format.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+)
+.with_chunk_pattern(&[3, 4, 4, 3]);
+
+let id = hce.encode(&uuid_bytes);
+// => "PET-RNIS-LORP-ENL"  (3 then 4 then 4 then 3 syllables, cycling)
+```
+
+## Changing the separator character
+
+`with_separator(char)` sets the separator independently of the chunking strategy. It applies to Natural, Fixed, and Pattern modes. The separator must not be an alphabetic character or a character used in the HCE phoneme alphabet — hyphens, dots, spaces, and underscores are all safe choices.
+
+<CodeGroup>
+
+```rust Hyphen (default)
+let hce = hce.with_separator('-');
+// => "PETREN-NISLORPEN-LAFLER"
+```
+
+```rust Space
+let hce = hce.with_separator(' ');
+// => "PETREN NISLORPEN LAFLER"
+```
+
+```rust Dot
+let hce = hce.with_separator('.');
+// => "PETREN.NISLORPEN.LAFLER"
+```
+
+```rust Underscore
+let hce = hce.with_separator('_');
+// => "PETREN_NISLORPEN_LAFLER"
+```
+
+</CodeGroup>
+
+## Python equivalents
+
+The Python API mirrors the Rust API. Pass the separator via `with_separator` after selecting a chunking strategy.
+
+```python
+import hce
+
+h = hce.Hce(
+    key=b"32-byte-secret-key-here-xxxxxx!!",
+    level="universal",
+    mode="sealed",
+)
+
+# Fixed chunking — 4 syllables per chunk
+fixed = h.with_chunk_fixed(4)
+print(fixed.encode(data))
+
+# Pattern chunking — cycle through [3, 4, 4, 3]
+patterned = h.with_chunk_pattern([3, 4, 4, 3])
+print(patterned.encode(data))
+
+# No separators
+compact = h.with_chunk_none()
+print(compact.encode(data))
+
+# Change separator to a dot
+dotted = h.with_separator(".")
+print(dotted.encode(data))
+```
+
+## CLI equivalents
+
+The `hce encode` command exposes all four strategies through dedicated flags.
+
+```bash
+# Natural chunking with a custom separator
+hce encode --separator '.' --key <hex-key> <hex-input>
+
+# No chunking
+hce encode --chunk-none --key <hex-key> <hex-input>
+
+# Fixed chunking (4 syllables per chunk)
+hce encode --chunk-fixed 4 --key <hex-key> <hex-input>
+
+# Pattern chunking (comma-separated syllable counts)
+hce encode --chunk-pattern 3,4,4,3 --key <hex-key> <hex-input>
+```

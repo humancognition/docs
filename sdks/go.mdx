@@ -1,0 +1,110 @@
+---
+title: "HCE Go SDK: cgo Bindings for Go Applications"
+sidebarTitle: "Go"
+description: "Use the HCE Go binding via cgo to encode binary identifiers into pronounceable strings. Wraps the Rust hce-ffi C ABI with full API reference and examples."
+---
+
+The HCE Go binding wraps the Rust `hce-ffi` C ABI via cgo. You must build the native Rust library first, then import the Go package — all encoding and decoding is delegated to the compiled Rust core, giving you the same performance and correctness as the native crate.
+
+## Prerequisites
+
+Build the `hce-ffi` shared library from the root of the HCE repository before importing the Go package. This produces `target/release/libhce_ffi.so` (Linux) or the platform equivalent.
+
+```bash
+cargo build -p hce-ffi --release
+```
+
+## Installation
+
+Set `CGO_LDFLAGS` to point at the release directory and run `go get` as usual.
+
+```bash
+CGO_LDFLAGS="-L$(pwd)/target/release -lhce_ffi" go get github.com/humancognition/hce
+```
+
+## Constructor
+
+```go
+c, err := hce.New(key []byte, level hce.Level, mode hce.Mode)
+defer c.Close()
+```
+
+<ParamField path="key" type="[]byte">
+  Encryption key bytes. Pass a 32-byte slice for `hce.Sealed` or `hce.Open` mode. Pass `nil` for `hce.Plain`.
+</ParamField>
+
+<ParamField path="level" type="hce.Level">
+  Phoneme level constant: `hce.Universal`, `hce.Eu`, `hce.En`, or `hce.Numeric`.
+</ParamField>
+
+<ParamField path="mode" type="hce.Mode">
+  Codec mode constant: `hce.Sealed` (HMAC-SHA256 confidentiality + integrity), `hce.Open` (sortable timestamp prefix), or `hce.Plain` (CRC integrity, no encryption).
+</ParamField>
+
+## Core Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `Encode(data []byte)` | `(string, error)` | Encode bytes to an HCE string |
+| `Decode(input string)` | `([]byte, error)` | Decode to original bytes |
+
+## Configuration Methods
+
+Call these methods on your `*Codec` before calling `Encode` or `Decode`.
+
+| Method | Description |
+|--------|-------------|
+| `WithBitWidth(bits uint32)` | Domain bit width (16–128) |
+| `WithCase(cas hce.Case)` | Output case |
+| `WithCheckSyllables(n int)` | HMAC check syllables (1–8) |
+| `WithSeparator(sep byte)` | Separator character between chunks |
+| `WithChunkNone()` | No separator — contiguous output string |
+| `WithChunkFixed(charSize int)` | Fixed syllable count per chunk |
+| `WithChunkPattern(pattern []int)` | Custom syllable-per-chunk pattern |
+| `WithTimestampConfig(epochMs int64, gran hce.Granularity)` | Timestamp prefix (`hce.Open` mode only) |
+
+## Full Example
+
+```go
+package main
+
+import (
+    "fmt"
+    hce "github.com/humancognition/hce"
+)
+
+func main() {
+    key := []byte("32-byte-secret-key-here-xxxxxx!!")
+    uuid := []byte{1, 149, 227, 160, 124, 46, 123, 65, 143, 61, 154, 108, 30, 11, 77, 39}
+
+    c, err := hce.New(key, hce.Universal, hce.Sealed)
+    if err != nil {
+        panic(err)
+    }
+    defer c.Close()
+
+    encoded, err := c.Encode(uuid)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(encoded)
+
+    decoded, err := c.Decode(encoded)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("%x\n", decoded)
+}
+```
+
+## Running Tests
+
+Set `LD_LIBRARY_PATH` so the Go test runner can locate the shared library, then run the standard test command.
+
+```bash
+LD_LIBRARY_PATH=target/release go test -v ./...
+```
+
+<Warning>
+  The `Codec` struct holds a native Rust allocation. Always call `c.Close()` when you are done — or use `defer c.Close()` immediately after a successful `hce.New` call — to release the underlying memory and avoid leaks.
+</Warning>

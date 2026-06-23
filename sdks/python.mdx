@@ -1,0 +1,95 @@
+---
+title: "HCE Python SDK: pip install hce API Reference"
+sidebarTitle: "Python"
+description: "Install the HCE Python package via pip and encode binary identifiers into pronounceable strings. Native PyO3 extension with full builder API reference."
+---
+
+The HCE Python package (`hce`) is a native extension built with PyO3. It exposes a near-identical API to the Rust core as a Python class, so you get the full performance of the compiled Rust codec with idiomatic Python syntax — no native build step required on your end.
+
+## Installation
+
+Install `hce` from PyPI with a single command. Pre-compiled wheels are available for Linux, macOS, and Windows on Python 3.8+.
+
+```bash
+pip install hce
+```
+
+## Constructor
+
+Import `hce` and instantiate the `Hce` class. You can chain builder methods directly off the constructor call.
+
+```python
+import hce
+
+h = hce.Hce(
+    key=b"32-byte-secret-key-here-xxxxxx!!",
+    level="universal",
+    mode="sealed",
+)
+```
+
+<ParamField path="key" type="bytes | None">
+  Encryption key bytes. Pass `None` only when `mode` is `"plain"` — all other modes require a key.
+</ParamField>
+
+<ParamField path="level" type="str">
+  Phoneme level: `"universal"` (default, broadest cross-language readability), `"eu"`, `"en"`, or `"numeric"`.
+</ParamField>
+
+<ParamField path="mode" type="str">
+  Codec mode: `"sealed"` (HMAC-SHA256 confidentiality + integrity), `"open"` (sortable timestamp prefix), or `"plain"` (CRC integrity, no encryption).
+</ParamField>
+
+<ParamField path="bit_width" type="int">
+  Cipher domain bit width from 16 to 128. Defaults to `128`.
+</ParamField>
+
+## Core Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `encode(data: bytes)` | `str` | Encode bytes to an HCE string |
+| `decode(input: str)` | `bytes` | Decode to original bytes; raises `ValueError` on integrity failure |
+| `recover(input: str)` | `bytes` | Attempt self-correction; raises `ValueError` if unrecoverable |
+
+## Configuration Methods
+
+Each method returns the `Hce` instance, so you can chain them in a builder pattern.
+
+| Method | Description |
+|--------|-------------|
+| `with_bit_width(bits: int)` | Domain bit width (16–128) |
+| `with_modulus(n: int)` | Custom modulus domain (must be ≥ 2) |
+| `with_cipher(kind: str, key: bytes \| None)` | `"feistel"` (8-round HMAC-SHA256) or `"shuffle"` (4-round lightweight) |
+| `with_case("upper" \| "lower")` | Output case; default `"upper"` |
+| `with_check_syllables(n: int)` | HMAC check syllables 1–8; default `1` |
+| `with_separator(sep: str)` | Separator character between chunks; default `"-"` |
+| `with_chunk_none()` | No separator — contiguous output string |
+| `with_chunk_fixed(char_size: int)` | Fixed syllable count per chunk |
+| `with_chunk_pattern(pattern: list[int])` | Custom syllable-per-chunk pattern, e.g. `[3, 3, 4, 4]` |
+| `with_timestamp_config(epoch_ms: int, granularity: str)` | Timestamp prefix (`"open"` mode only) |
+
+<Note>
+  `with_timestamp_config` accepts granularity strings: `"second"`, `"minute"`, `"hour"`, `"day"`, `"week"`, or `"month"`. It only has effect when the codec `mode` is `"open"`.
+</Note>
+
+## Full Example
+
+The example below encodes a raw 16-byte UUID, then decodes it back and asserts the round-trip is lossless.
+
+```python
+import hce
+
+h = hce.Hce(
+    key=b"32-byte-secret-key-here-xxxxxx!!",
+    level="universal",
+    mode="sealed",
+).with_check_syllables(2).with_chunk_fixed(4)
+
+uuid_bytes = bytes([0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+                     0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27])
+encoded = h.encode(uuid_bytes)
+decoded = h.decode(encoded)
+assert decoded == uuid_bytes
+print(encoded)
+```

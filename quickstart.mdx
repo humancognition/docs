@@ -1,47 +1,115 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with HCE: Encode Your First Identifier"
+sidebarTitle: "Quickstart"
+description: "Install HCE, create a codec with a secret key, encode a UUID into a pronounceable string, and decode it back to the original bytes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through everything you need to encode your first identifier and decode it back to its original bytes. By the end you will have a working codec, a real encoded output, and the confidence to wire HCE into your own project. The examples use Rust for the main walkthrough, with equivalent install commands for Python and JavaScript shown alongside.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+
+  <Step title="Install HCE">
+    Add HCE to your project using the package manager for your language.
+
+    <CodeGroup>
+
+    ```toml Rust (Cargo.toml)
+    [dependencies]
+    hce-core = "0.1"
+
+    # Optional: adapters for UUID, ULID, Snowflake, Xid
+    hce-adapters = "0.1"
+
+    # Optional: additional cipher backends (Feistel, Shuffle)
+    hce-fpe = "0.1"
+    ```
+
+    ```bash Python
+    pip install hce
+    ```
+
+    ```bash JavaScript / Node.js
+    npm install @humancognition/hce
+    ```
+
+    </CodeGroup>
+
+    If you want the command-line tool alongside your project, install it globally with Cargo:
 
     ```bash
-    npm install your-package
+    cargo install hce-cli
     ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
-    ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Create a Codec">
+    Instantiate `Hce` with a 32-byte secret key, a language level, and an operating mode. The `Sealed` mode encrypts the identifier fully and attaches an HMAC check syllable — the right choice for most production use cases.
+
+    ```rust
+    use hce_core::{Hce, HceMode, LanguageLevel};
+
+    let hce = Hce::new(
+        Some(b"32-byte-secret-key-here-xxxxxx!!"),
+        LanguageLevel::Universal,
+        HceMode::Sealed,
+    );
     ```
+
+    `LanguageLevel::Universal` selects the cross-lingual phoneme set built from PHOIBLE data — phoneme pairs that appear in at least 40% of surveyed languages — so the output is pronounceable across most major languages. If your audience is English-only, `LanguageLevel::En` produces slightly more English-natural syllables.
+
   </Step>
+
+  <Step title="Encode an Identifier">
+    Pass your raw identifier bytes to `encode`. The method runs the Feistel FPE cipher, maps the ciphertext to phonemic syllables, appends a check syllable, and returns a dash-separated string.
+
+    ```rust
+    let id = hce.encode(&[1, 149, 227, 160, 124, 46, 123, 65,
+                           143, 61, 154, 108, 30, 11, 77, 39]);
+
+    println!("{}", id);
+    // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+    ```
+
+    The output is uppercase by default. You can call `.with_case(HceCase::Lower)` on the codec to get lowercase, or `.with_separator('/')` to change the chunk delimiter.
+
+  </Step>
+
+  <Step title="Decode Back to Bytes">
+    Pass the encoded string to `decode`. HCE verifies the check syllable, strips it, reverses the phoneme-to-integer mapping, and applies the inverse Feistel cipher to recover the original bytes exactly.
+
+    ```rust
+    let bytes = hce.decode(&id).unwrap();
+
+    assert_eq!(
+        bytes,
+        vec![1, 149, 227, 160, 124, 46, 123, 65,
+             143, 61, 154, 108, 30, 11, 77, 39]
+    );
+    ```
+
+    `decode` returns a `Result`. If the string was modified — even a single character changed — the HMAC check syllable will not match and `decode` returns an `Err`. You can call `hce.recover(&id)` instead to attempt automatic self-correction of common phoneme transcription errors before hard-failing.
+
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+<Note>
+  **Key management matters.** Your 32-byte key is the secret that makes encoded identifiers opaque. Anyone who holds the key can decode any string produced with it. Store your key in an environment variable or secrets manager — never hard-code it in source. If you need to rotate keys, re-encode your existing identifiers before retiring the old key, because decoding always requires the same key that was used to encode.
+</Note>
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Modes" icon="sliders" href="/concepts/modes">
+    Learn when to use Sealed vs Open vs Plain, and how Open mode adds a sortable timestamp prefix.
+  </Card>
+  <Card title="Language Levels" icon="language" href="/concepts/language-levels">
+    Explore the Universal, EU, English, and Numeric phoneme sets and how they affect output readability.
+  </Card>
+  <Card title="Adapters" icon="plug" href="/adapters/overview">
+    Use the built-in UUID, ULID, Snowflake, and Xid adapters to skip manual byte wrangling.
+  </Card>
+  <Card title="CLI" icon="terminal" href="/cli/overview">
+    Encode and decode identifiers from the command line with `hce encode`, `hce decode`, and `hce recover`.
+  </Card>
+</CardGroup>

@@ -1,0 +1,101 @@
+---
+title: "HCE JavaScript SDK: npm install @humancognition/hce"
+sidebarTitle: "JavaScript"
+description: "Install @humancognition/hce to encode binary identifiers into pronounceable strings from Node.js or the browser. Full WebAssembly API reference included."
+---
+
+`@humancognition/hce` is a WebAssembly package compiled directly from the Rust core. It works in both Node.js and browser environments with no native build step — you install from npm and load the `.wasm` binary at runtime.
+
+## Installation
+
+```bash
+npm install @humancognition/hce
+```
+
+## Initialization
+
+The WASM module must be initialized before you create any `HceCodec` instance. Use `initSync` in Node.js for synchronous startup, or `await init()` in the browser.
+
+<Tabs>
+  <Tab title="Node.js">
+    ```js
+    import { readFileSync } from "fs";
+    import { initSync, HceCodec } from "@humancognition/hce";
+
+    const wasm = readFileSync("node_modules/@humancognition/hce/index_bg.wasm");
+    initSync(wasm);
+    ```
+  </Tab>
+  <Tab title="Browser">
+    ```js
+    import init, { HceCodec } from "@humancognition/hce";
+    await init();
+    ```
+  </Tab>
+</Tabs>
+
+## Constructor
+
+```ts
+new HceCodec(key: string | null, level: string, mode: string)
+```
+
+<ParamField path="key" type="string | null">
+  Hex-encoded encryption key string. Pass `null` for plain mode. Convert a raw byte key to hex with `Buffer.from(key).toString("hex")` in Node.js.
+</ParamField>
+
+<ParamField path="level" type="string">
+  Phoneme level: `"universal"` (broadest readability), `"eu"`, `"en"`, or `"numeric"`.
+</ParamField>
+
+<ParamField path="mode" type="string">
+  Codec mode: `"sealed"` (HMAC-SHA256 confidentiality + integrity), `"open"` (sortable timestamp prefix), or `"plain"` (CRC integrity, no encryption).
+</ParamField>
+
+## Core Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `encode(data: Uint8Array)` | `string` | Encode bytes to an HCE string |
+| `decode(input: string)` | `Uint8Array` | Decode to original bytes |
+| `recover(input: string)` | `Uint8Array` | Attempt self-correction on corrupted input |
+
+## Configuration Methods
+
+Each method returns the `HceCodec` instance so you can chain them fluently.
+
+| Method | Description |
+|--------|-------------|
+| `withBitWidth(32 \| 64 \| 96 \| 128)` | Domain bit width; default `128` |
+| `withDomainModulus(n: string)` | Custom modulus as a decimal string |
+| `withCase(uppercase: boolean)` | `true` = uppercase output (default); `false` = lowercase |
+| `withCheckSyllables(n: number)` | HMAC check syllables 1–8; default `1` |
+| `withSeparator(sep: string)` | Separator character between chunks; default `"-"` |
+| `withChunkNone()` | No separator — contiguous output string |
+| `withChunkFixed(charSize: number)` | Fixed syllable count per chunk |
+| `withChunkPattern(pattern: number[])` | Custom syllable-per-chunk pattern |
+| `withCipher("feistel" \| "shuffle", key?: string)` | Cipher selection; `"feistel"` is the default 8-round HMAC-SHA256 cipher |
+| `withTimestampConfig(epochMs: number, gran: string)` | Timestamp prefix (`"open"` mode only) |
+
+<Tip>
+  Pass the same hex key to `withCipher` when you need to use a dedicated cipher key separate from the top-level codec key.
+</Tip>
+
+## Full Example
+
+```js
+import { randomBytes } from "crypto";
+import { readFileSync } from "fs";
+import { initSync, HceCodec } from "@humancognition/hce";
+
+const wasm = readFileSync("node_modules/@humancognition/hce/index_bg.wasm");
+initSync(wasm);
+
+const key = Buffer.from("32-byte-secret-key-here-xxxxxx!!").toString("hex");
+const hce = new HceCodec(key, "universal", "sealed");
+
+const id = hce.encode(randomBytes(16));
+console.log(id); // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+const decoded = hce.decode(id);
+```

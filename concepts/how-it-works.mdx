@@ -1,0 +1,88 @@
+---
+title: "How HCE Encodes and Encrypts Binary Identifiers"
+sidebarTitle: "How It Works"
+description: "HCE transforms binary identifiers into pronounceable strings through format-preserving encryption, a phoneme mapping, and HMAC-SHA256 integrity checks."
+---
+
+When you call `hce.encode()`, HCE takes your raw bytes, encrypts them in-place using a Feistel-based format-preserving cipher, and then maps each encrypted integer value to a sequence of human-readable syllables. The result is a string like `PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN` — fully reversible, exactly the same length every time, and impossible to decode without your secret key.
+
+## The Encoding Pipeline
+
+<Steps>
+  <Step title="Input bytes become a big integer">
+    Your input bytes are loaded into a 128-bit integer (or a smaller domain if you call `with_bit_width()` or `with_modulus()`). If you pass fewer bytes than the domain requires, the buffer is zero-padded. Every value in the domain has exactly one corresponding HCE string — the mapping is bijective.
+  </Step>
+  <Step title="Format-preserving encryption (FPE) is applied">
+    HCE runs a Feistel network with **8 rounds** using **HMAC-SHA256** as the round function. The cipher operates entirely within the configured domain — the encrypted value is always a valid integer in the same range as the plaintext. This is what makes the encoding format-preserving: bit-width in, same bit-width out.
+
+    The Feistel network is keyed by your secret key and a four-byte **tweak** that encodes the language level, mode, and domain width. Two codecs with different levels or modes will produce different output even for the same key and input.
+  </Step>
+  <Step title="Encrypted integer maps to phonemic syllables">
+    The encrypted integer is converted to a sequence of syllable tokens using a mixed-radix encoding. Each syllable consists of:
+
+    - An **onset** (consonant or consonant cluster) — 35 choices
+    - A **vowel nucleus** (plain vowel or vowel + coda) — 20 choices
+
+    Together, each syllable encodes one of **700** (35 × 20) possible values. A 128-bit input requires approximately **14 body syllables** to represent the full value.
+  </Step>
+  <Step title="Check syllables are appended">
+    After the body syllables are produced, HCE appends **check syllables** for integrity verification. The number of check syllables is configurable (default: 1; range: 1–8):
+
+    - In **Sealed** and **Open** modes, check syllables are derived from an HMAC-SHA256 of your key and the body tokens.
+    - In **Plain** mode, a CRC is used instead.
+
+    During decoding, HCE recomputes the expected check and compares it to the encoded check. A mismatch returns `HceError::IntegrityFailure` immediately — no partial data is ever returned.
+  </Step>
+  <Step title="Syllables are chunked and joined">
+    The body syllables and check syllable(s) are rendered as text (uppercase by default) and grouped into chunks separated by a configurable separator character (default: `-`). The default "natural" chunk layout produces five body chunks plus one check chunk for 128-bit input, resulting in strings like `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XX`.
+
+    You can control chunking with `with_chunk_spec()` using fixed-width, pattern-based, or no chunking at all.
+  </Step>
+</Steps>
+
+## Format Preservation
+
+One of HCE's defining properties is that the **output length is fully determined by your configuration** — it never varies across different input values. For the default 128-bit domain with one check syllable, you always get the same syllable count regardless of what the input bytes are.
+
+| Domain (bit width) | Body syllables | Check syllables (default) | Total syllables |
+|--------------------|---------------|--------------------------|-----------------|
+| 128-bit            | ~13–14        | 1                        | ~14–15          |
+| 64-bit             | ~7            | 1                        | ~8              |
+| 32-bit             | ~4            | 1                        | ~5              |
+
+This predictability makes HCE safe to use in fixed-width database columns and display fields without length-checking logic.
+
+## The Phoneme System
+
+HCE encodes values in **radix 700**: 35 possible onsets multiplied by 20 possible vowel nuclei. Onsets are either single consonants (`b`, `d`, `g`, `k`, `m`, `n`, `p`, `t`, `s`, `l`, `r`, `f`, `h`, `j`, `w`) or two-letter consonant clusters (`bl`, `br`, `dr`, `fl`, `fr`, `gl`, `gr`, `kl`, `kr`, `pl`, `pr`, `sl`, `sr`, `tr`, `st`, `sp`, `sk`, `sm`, `sw`, `tw`). Vowel nuclei are plain vowels (`a`, `e`, `i`, `o`, `u`) or vowel-plus-coda combinations (`an`, `al`, `ar`, `en`, `el`, `er`, `in`, `il`, `ir`, `on`, `ol`, `or`, `un`, `ul`, `ur`).
+
+Combining a consonant onset with a vowel nucleus produces a syllable like `ba`, `dren`, `flo`, or `krul`. These patterns are pronounceable across a wide range of languages because the phonemes are chosen from sounds that appear in at least 40% of the world's languages (the Universal level). The four [language levels](/concepts/language-levels) let you tune the phoneme set for your audience.
+
+## Encode and Decode Roundtrip
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+);
+
+// Encode 16 bytes (e.g. a UUID) into a pronounceable string
+let uuid_bytes: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+
+let id = hce.encode(&uuid_bytes);
+// e.g. "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN-BU"
+
+// Decode back to the original bytes — lossless and exact
+let recovered = hce.decode(&id).unwrap();
+assert_eq!(recovered, uuid_bytes.to_vec());
+```
+
+<Note>
+  `decode()` returns `Err(HceError::IntegrityFailure)` if the string has been tampered with or if the wrong key is used. It never silently returns incorrect bytes.
+</Note>

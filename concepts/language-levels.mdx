@@ -1,0 +1,94 @@
+---
+title: "Language Levels: Phoneme Sets for Global Audiences"
+sidebarTitle: "Language Levels"
+description: "HCE's four language levels — Universal, Eu, En, and Numeric — select phoneme sets tuned for different audiences without changing output length."
+---
+
+When an HCE string is read aloud, written down, or communicated verbally, the sounds it contains matter. HCE uses different **language levels** to select phoneme sets that feel natural to speakers of different languages. Every level shares the same mathematical structure — 35 onsets, 20 vowel nuclei, radix 700 — so they all produce output of identical length. The only difference is which actual sounds (and their written representations) are used.
+
+## Level Comparison
+
+| Level | Onsets | Vowel + Nucleus | Best For |
+|-------|--------|-----------------|----------|
+| `Universal` | 35 | 20 | Cross-lingual; phonemes present in 40%+ of PHOIBLE languages |
+| `Eu` | 35 | 20 | European language speakers |
+| `En` | 35 | 20 | English-only environments |
+| `Numeric` | 35 | 20 | Numeric-style text representations |
+
+All four levels use the **same radix** (700 = 35 × 20), so a 128-bit identifier always encodes to the same number of syllables regardless of which level you choose. You can safely switch levels between deployments as long as you re-encode existing identifiers.
+
+---
+
+## Universal
+
+Universal is the recommended default. Its phonemes are drawn from sounds that appear in at least 40% of the world's languages according to the [PHOIBLE](https://phoible.org/) database. That means a Universal-encoded string will be reasonably pronounceable by speakers of most major languages — including speakers of East Asian, South Asian, African, and European languages — without requiring them to contort to unfamiliar sounds.
+
+Single consonant onsets include: `b`, `d`, `g`, `k`, `m`, `n`, `p`, `t`, `s`, `l`, `r`, `f`, `h`, `j`, `w`.
+
+Consonant cluster onsets include: `bl`, `br`, `dr`, `fl`, `fr`, `gl`, `gr`, `kl`, `kr`, `pl`, `pr`, `sl`, `sr`, `tr`, `st`, `sp`, `sk`, `sm`, `sw`, `tw`.
+
+Vowel nuclei are plain vowels (`a`, `e`, `i`, `o`, `u`) and vowel-plus-coda combinations (`an`, `al`, `ar`, `en`, `el`, `er`, `in`, `il`, `ir`, `on`, `ol`, `or`, `un`, `ul`, `ur`).
+
+---
+
+## Eu
+
+The `Eu` level is tuned for **European language speakers**. It may include consonant clusters and vowel combinations that are natural in Germanic, Romance, and Slavic languages but less familiar in other language families. Use `Eu` when you know your audience reads and speaks predominantly European languages and you want to maximise naturalness for that group.
+
+---
+
+## En
+
+The `En` level targets **English speakers** specifically. Its phoneme set focuses on sounds and spellings that are comfortable and unambiguous for native English readers. If your product is exclusively English-language and your users will always type or speak identifiers in English contexts, `En` can minimise mispronunciation caused by ambiguous spelling conventions.
+
+---
+
+## Numeric
+
+The `Numeric` level produces output that **visually resembles numeric codes**. The phoneme representations are chosen to look like digits and short number-like strings rather than natural words. This is useful when you need output that fits visually into a context where users expect something number-like — for example, printed voucher codes or PIN-style identifiers — while still benefiting from HCE's pronounceability and structure.
+
+<Tip>
+  Use `LanguageLevel::Numeric` when your product displays identifiers alongside actual numbers and you want a consistent visual style across both. The output still passes through FPE encryption and check syllables — it is just rendered in a numeric-adjacent character set.
+</Tip>
+
+---
+
+## Rust Example
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let key = Some(b"32-byte-secret-key-here-xxxxxx!!" as &[u8]);
+let input: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+
+// Universal — cross-lingual default
+let hce_universal = Hce::new(key, LanguageLevel::Universal, HceMode::Sealed);
+let id_universal = hce_universal.encode(&input);
+
+// Eu — European language phoneme set
+let hce_eu = Hce::new(key, LanguageLevel::Eu, HceMode::Sealed);
+let id_eu = hce_eu.encode(&input);
+
+// En — English-only phoneme set
+let hce_en = Hce::new(key, LanguageLevel::En, HceMode::Sealed);
+let id_en = hce_en.encode(&input);
+
+// Numeric — numeric-style text representation
+let hce_numeric = Hce::new(key, LanguageLevel::Numeric, HceMode::Sealed);
+let id_numeric = hce_numeric.encode(&input);
+
+// All four strings have the same syllable count — only the
+// rendered characters differ. Each codec can only decode its
+// own output; levels are not interchangeable.
+assert_eq!(
+    hce_universal.decode(&id_universal).unwrap(),
+    input.to_vec()
+);
+```
+
+<Note>
+  Language levels are encoded in the FPE tweak, so a string encoded at one level cannot be decoded by a codec configured with a different level. If you change the level in production, you must re-encode all existing identifiers.
+</Note>

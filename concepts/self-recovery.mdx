@@ -1,0 +1,124 @@
+---
+title: "Self-Recovery: Correcting Phoneme Confusions in HCE"
+sidebarTitle: "Self-Recovery"
+description: "HCE's self-recovery system corrects common phoneme confusions like m/n, al/an, and bl/br that occur when identifiers are spoken aloud or hand-transcribed."
+---
+
+When an identifier is read aloud over a phone call, hand-written on paper, or typed from memory, small errors are inevitable. A speaker might say "bren" but a listener hears "blen". Someone copying from a screen might write "droflin" instead of "drofrin". HCE's self-recovery system addresses this directly: given a string that fails its integrity check, `hce.recover()` searches the confusion matrix — a catalogue of phoneme pairs that are commonly mistaken for one another — and attempts to find a single-token correction that restores a valid check. If exactly one correction works, the identifier is returned corrected. If several corrections are plausible, the result is marked ambiguous. If none work, the string is rejected.
+
+## RecoveryResult Variants
+
+When you call `hce.recover()`, it returns a `Result<RecoveryResult, HceError>`. The inner `RecoveryResult` has four variants:
+
+<CardGroup cols={2}>
+  <Card title="Ok" icon="circle-check">
+    The string passed its integrity check without any correction. The original input was already valid — no changes were made.
+  </Card>
+  <Card title="Corrected(tokens)" icon="wand-magic-sparkles">
+    Exactly one single-token correction was found that restores a valid HMAC-SHA256 check. The corrected token sequence is returned for you to decode.
+  </Card>
+  <Card title="Ambiguous(n)" icon="circle-question">
+    Multiple valid corrections were found. The integer `n` is the number of candidates. You cannot auto-correct safely; prompt the user to re-read the identifier.
+  </Card>
+  <Card title="Reject" icon="circle-xmark">
+    No correction in the confusion matrix produced a valid check. The string is too corrupted to recover with a single-token fix. Ask the user to re-enter the full identifier.
+  </Card>
+</CardGroup>
+
+## Common Correctable Confusions
+
+The universal confusion matrix covers the phoneme pairs most commonly confused in verbal and handwritten communication:
+
+**Consonant onset confusions:**
+- `m` ↔ `n` — nasals that sound nearly identical in many accents
+- `b` ↔ `p` — voiced/unvoiced bilabial stops
+- `d` ↔ `t` — voiced/unvoiced alveolar stops
+- `g` ↔ `k` — voiced/unvoiced velar stops
+- `l` ↔ `r` — lateral vs. rhotic, frequently confused cross-linguistically
+
+**Consonant cluster confusions (l/r swap):**
+- `bl` ↔ `br`, `fl` ↔ `fr`, `gl` ↔ `gr`, `kl` ↔ `kr`
+- `pl` ↔ `pr`, `sl` ↔ `sr`, `dr` ↔ `dl` (where available)
+- `st` ↔ `sp`, `sk` ↔ `sm`, and related cluster pairs
+
+**Vowel nucleus confusions (coda swap):**
+- `an` ↔ `al`, `al` ↔ `ar`
+- `en` ↔ `el`, `el` ↔ `er`
+- `in` ↔ `il`, `il` ↔ `ir`
+- `on` ↔ `ol`, `ol` ↔ `or`
+- `un` ↔ `ul`, `ul` ↔ `ur`
+
+All confusions are symmetric — if `m` can be confused with `n`, the matrix also considers that `n` may have been intended when `m` was received.
+
+## Rust Example
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel, RecoveryResult};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+);
+
+let original_bytes: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+
+// Encode the original identifier
+let id = hce.encode(&original_bytes);
+// e.g. "BREFLAN-DRONKEL-SMIREN-PLAFREN-BLODREN-KU"
+
+// Simulate a transcription error: one syllable was misheard
+let misheard = id.replace("BREFLAN", "BREFRAN"); // bl→br confusion
+
+// Attempt recovery
+match hce.recover(&misheard).unwrap() {
+    RecoveryResult::Ok => {
+        // No error — string was already valid
+        println!("No correction needed");
+    }
+    RecoveryResult::Corrected(ref tokens) => {
+        // Exactly one correction found — decode it
+        let recovered_bytes = hce.decode_corrected(tokens).unwrap();
+        assert_eq!(recovered_bytes, original_bytes.to_vec());
+        println!("Corrected and decoded successfully");
+    }
+    RecoveryResult::Ambiguous(n) => {
+        // Multiple candidates — cannot auto-correct
+        println!("Ambiguous: {} possible corrections, please re-read the identifier", n);
+    }
+    RecoveryResult::Reject => {
+        // No single-token fix found
+        println!("Cannot recover — please re-enter the full identifier");
+    }
+}
+```
+
+## Reducing Ambiguity with More Check Syllables
+
+Every check syllable adds more HMAC-SHA256 discriminating power to the integrity check. With the default of one check syllable, a small number of recoveries may return `Ambiguous` rather than `Corrected`. Increasing the check syllable count makes it far less likely that two different corrections both produce a valid check:
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+// Two check syllables — much lower chance of Ambiguous results,
+// at the cost of a slightly longer output string
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+)
+.with_check_syllables(2);
+
+let id = hce.encode(&[0x01u8; 16]);
+let decoded = hce.decode(&id).unwrap();
+assert_eq!(decoded, vec![0x01u8; 16]);
+```
+
+The tradeoff is output length: each additional check syllable adds two to four characters to the encoded string. For most applications one or two check syllables provides an excellent balance between recovery accuracy and output brevity.
+
+<Note>
+  Self-recovery requires **Sealed or Open mode**. In Plain mode, `hce.recover()` returns `Err(HceError::RecoveryNotSupported)` because the CRC check has too little discriminating power to reliably distinguish a corrected value from a coincidental false positive. If you need self-recovery, switch to Sealed or Open mode and provide a secret key.
+</Note>

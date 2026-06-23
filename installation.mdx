@@ -1,0 +1,358 @@
+---
+title: "Installing HCE for Rust, Python, JS, Go, and Beyond"
+sidebarTitle: "Installation"
+description: "Install HCE in Rust, Python, JavaScript, Go, Java, Swift, Elixir, or MySQL — with setup instructions and a minimal usage snippet for each platform."
+---
+
+HCE is available for Rust, Python, JavaScript/WASM, Go, Java, Swift, Elixir, and MySQL/MariaDB. The Rust, Python, and JavaScript packages install with a single command and have no native build step. Go, Java, Swift, and Elixir bindings wrap the native `hce-ffi` C ABI, so they require you to build the Rust FFI library first — see the warning below.
+
+<Warning>
+  **Go, Java, Swift, and Elixir require the native FFI library.** Before installing any of these bindings, build `hce-ffi` with Cargo:
+
+  ```bash
+  cargo build -p hce-ffi --release
+  ```
+
+  This produces `target/release/libhce_ffi.so` (Linux), `libhce_ffi.dylib` (macOS), or `hce_ffi.dll` (Windows). Copy or link this file to a location visible to your runtime's dynamic linker before running your application.
+</Warning>
+
+<Tabs>
+
+  <Tab title="Rust">
+    Add `hce-core` to your `Cargo.toml`. Pull in `hce-adapters` if you work with typed identifiers like UUID or ULID, and `hce-fpe` if you want to swap in a different cipher backend.
+
+    ```toml
+    [dependencies]
+    hce-core = "0.1"
+
+    # Typed adapters for UUID, ULID, Snowflake, Xid, ObjectId
+    hce-adapters = "0.1"
+
+    # Additional cipher backends: Feistel, Shuffle
+    hce-fpe = "0.1"
+    ```
+
+    For the standalone CLI tool, install it globally:
+
+    ```bash
+    cargo install hce-cli
+    ```
+
+    Minimal usage:
+
+    ```rust
+    use hce_core::{Hce, HceMode, LanguageLevel};
+
+    let hce = Hce::new(
+        Some(b"32-byte-secret-key-here-xxxxxx!!"),
+        LanguageLevel::Universal,
+        HceMode::Sealed,
+    );
+
+    let encoded = hce.encode(&[1, 149, 227, 160, 124, 46, 123, 65,
+                                143, 61, 154, 108, 30, 11, 77, 39]);
+    // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+    let decoded = hce.decode(&encoded).unwrap();
+    ```
+  </Tab>
+
+  <Tab title="Python">
+    Install the `hce` package from PyPI. It ships as a compiled Maturin extension with no additional dependencies.
+
+    ```bash
+    pip install hce
+    ```
+
+    Minimal usage:
+
+    ```python
+    import hce
+
+    h = hce.Hce(
+        key=b"32-byte-secret-key-here-xxxxxx!!",
+        level="universal",
+        mode="sealed",
+    )
+
+    encoded = h.encode(bytes([1, 149, 227, 160, 124, 46, 123, 65,
+                               143, 61, 154, 108, 30, 11, 77, 39]))
+    # => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+    decoded = h.decode(encoded)
+    print(decoded.hex())
+    ```
+
+    The constructor accepts `key` as `bytes` or `None` (for plain/unencrypted mode), `level` as a string (`"universal"`, `"eu"`, `"en"`, `"numeric"`), and `mode` as a string (`"sealed"`, `"open"`, `"plain"`).
+  </Tab>
+
+  <Tab title="JavaScript">
+    Install the WASM-compiled package from npm. It works in Node.js and modern browsers with no native dependencies.
+
+    ```bash
+    npm install @humancognition/hce
+    ```
+
+    **Node.js** — use `initSync` to load the WASM binary synchronously before constructing a codec:
+
+    ```js
+    import { readFileSync } from "fs";
+    import { initSync, HceCodec } from "@humancognition/hce";
+
+    const wasm = readFileSync("node_modules/@humancognition/hce/index_bg.wasm");
+    initSync(wasm);
+
+    const key = Buffer.from("32-byte-secret-key-here-xxxxxx!!").toString("hex");
+    const hce = new HceCodec(key, "universal", "sealed");
+
+    const encoded = hce.encode(
+      new Uint8Array([1, 149, 227, 160, 124, 46, 123, 65,
+                      143, 61, 154, 108, 30, 11, 77, 39])
+    );
+    // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+    const decoded = hce.decode(encoded);
+    ```
+
+    **Browser** — use the async `init` function instead, then construct the codec normally:
+
+    ```js
+    import init, { HceCodec } from "@humancognition/hce";
+
+    await init();
+
+    const hce = new HceCodec(null, "universal", "plain");
+    const encoded = hce.encode(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7,
+                                               8, 9, 10, 11, 12, 13, 14, 15]));
+    ```
+
+    Pass `null` as the key in `Plain` mode (no encryption, CRC integrity only). In `Sealed` or `Open` mode, pass the key as a hex-encoded string.
+  </Tab>
+
+  <Tab title="Go">
+    Build the native FFI library first, then install the Go module with the correct `CGO_LDFLAGS` pointing at the built artifact:
+
+    ```bash
+    # Step 1: build the native library
+    cargo build -p hce-ffi --release
+
+    # Step 2: install the Go module
+    CGO_LDFLAGS="-L$(pwd)/target/release -lhce_ffi" \
+      go get github.com/humancognition/hce
+    ```
+
+    When running tests or your application, set `LD_LIBRARY_PATH` (Linux) or `DYLD_LIBRARY_PATH` (macOS) so the dynamic linker can find `libhce_ffi`:
+
+    ```bash
+    LD_LIBRARY_PATH=target/release go run main.go
+    ```
+
+    Minimal usage:
+
+    ```go
+    package main
+
+    import (
+        "fmt"
+        hce "github.com/humancognition/hce"
+    )
+
+    func main() {
+        key := []byte("32-byte-secret-key-here-xxxxxx!!")
+        uuid := []byte{1, 149, 227, 160, 124, 46, 123, 65,
+                       143, 61, 154, 108, 30, 11, 77, 39}
+
+        c, err := hce.New(key, hce.Universal, hce.Sealed)
+        if err != nil {
+            panic(err)
+        }
+        defer c.Close()
+
+        encoded, _ := c.Encode(uuid)
+        fmt.Println(encoded)
+        // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+        decoded, _ := c.Decode(encoded)
+        fmt.Printf("%x\n", decoded)
+    }
+    ```
+
+    Always call `c.Close()` when you are finished with a codec to release the underlying FFI handle.
+  </Tab>
+
+  <Tab title="Java">
+    Add the JNA dependency to your `pom.xml`, then copy the compiled native library to a directory on your `java.library.path`.
+
+    ```xml
+    <!-- pom.xml -->
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna</artifactId>
+      <version>5.16.0</version>
+    </dependency>
+    ```
+
+    Build and install the native library:
+
+    ```bash
+    cargo build -p hce-ffi --release
+    cp target/release/libhce_ffi.so /usr/lib/
+    # macOS: cp target/release/libhce_ffi.dylib /usr/local/lib/
+    ```
+
+    Minimal usage:
+
+    ```java
+    import com.github.tmddn3070.hce.HceCodec;
+
+    byte[] key = "32-byte-secret-key-here-xxxxxx!!".getBytes();
+    byte[] uuid = {1, -107, -29, -96, 124, 46, 123, 65,
+                   -113, 61, -102, 108, 30, 11, 77, 39};
+
+    try (HceCodec h = new HceCodec(key, HceCodec.UNIVERSAL, HceCodec.SEALED)) {
+        String encoded = h.encode(uuid);
+        // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+        byte[] decoded = h.decode(encoded);
+    }
+    ```
+
+    `HceCodec` implements `AutoCloseable`, so you can use it in a try-with-resources block. To point the JVM at the library at runtime: `java -Djava.library.path=target/release MyApp`.
+  </Tab>
+
+  <Tab title="Swift">
+    Add the HCE Swift package to your `Package.swift` manifest, then build and install `libhce_ffi.dylib`:
+
+    ```swift
+    // Package.swift
+    // swift-tools-version:5.9
+    import PackageDescription
+
+    let package = Package(
+        name: "MyApp",
+        dependencies: [
+            .package(path: "bindings/swift"),
+        ],
+        targets: [
+            .target(name: "MyApp", dependencies: ["Hce"]),
+        ]
+    )
+    ```
+
+    Build and install the native library:
+
+    ```bash
+    cargo build -p hce-ffi --release
+    cp target/release/libhce_ffi.dylib /usr/local/lib/
+    ```
+
+    Minimal usage:
+
+    ```swift
+    import Hce
+
+    let key = "32-byte-secret-key-here-xxxxxx!!".data(using: .utf8)!
+    let uuid = Data([1, 149, 227, 160, 124, 46, 123, 65,
+                     143, 61, 154, 108, 30, 11, 77, 39])
+
+    guard let h = HceCodec(key: key, level: .universal, mode: .sealed) else {
+        fatalError("Failed to initialise codec")
+    }
+
+    if let encoded = h.encode(uuid) {
+        print(encoded)
+        // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+    }
+
+    if let decoded = h.decode(encoded!) {
+        print(decoded as NSData)
+    }
+    ```
+  </Tab>
+
+  <Tab title="Elixir">
+    Add `hce` to your `mix.exs` dependencies, pointing at the local `bindings/elixir` path. The binding uses Rustler under the hood, so the Elixir compiler will call Cargo automatically when you run `mix deps.compile`.
+
+    ```elixir
+    # mix.exs
+    defp deps do
+      [
+        {:hce, path: "bindings/elixir"}
+      ]
+    end
+    ```
+
+    Build the native library beforehand so Rustler can link against it:
+
+    ```bash
+    cargo build -p hce-ffi --release
+    ```
+
+    Minimal usage:
+
+    ```elixir
+    {:ok, h} = Hce.new("32-byte-secret-key-here-xxxxxx!!", :universal, :sealed)
+
+    encoded = Hce.encode(h, <<1, 149, 227, 160, 124, 46, 123, 65,
+                               143, 61, 154, 108, 30, 11, 77, 39>>)
+    # => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+
+    {:ok, decoded} = Hce.decode(h, encoded)
+
+    # Configuration is chainable
+    h
+    |> Hce.with_case(:lower)
+    |> Hce.with_bit_width(64)
+
+    # Always destroy the codec handle when done
+    Hce.destroy(h)
+    ```
+
+    Call `Hce.destroy/1` when you are finished to free the native handle. You can call `mix test` to verify your setup once the library is built.
+  </Tab>
+
+  <Tab title="MySQL / MariaDB">
+    HCE ships a MySQL UDF (User-Defined Function) that lets you encode and decode identifiers directly inside SQL queries. Compile the UDF against your MySQL headers, then register the functions:
+
+    ```bash
+    # Compile the UDF shared library
+    cc -shared -fPIC \
+       -I $(mysql_config --include) \
+       -I ../../crates/hce-ffi \
+       -o libhce_udf.so hce_udf.c \
+       -L ../../target/release -lhce_ffi
+
+    # Install it into MySQL's plugin directory
+    cp libhce_udf.so $(mysql_config --plugindir)/
+    ```
+
+    Register the functions in MySQL:
+
+    ```sql
+    CREATE FUNCTION hce_encode RETURNS STRING SONAME 'libhce_udf.so';
+    CREATE FUNCTION hce_decode RETURNS STRING SONAME 'libhce_udf.so';
+    ```
+
+    Minimal usage:
+
+    ```sql
+    -- Encode a 16-byte BLOB
+    SELECT hce_encode(UNHEX('0195e3a07c2e7b418f3d9a6c1e0b4d27'));
+    -- => 'PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN'
+
+    -- Decode back to binary
+    SELECT HEX(hce_decode('PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN'));
+
+    -- Encode an entire column with a custom key (level=0 universal, mode=0 sealed)
+    SELECT hce_encode(data_col, 'custom-32-byte-key-here-xxxxx!!', 0, 0)
+    FROM items;
+
+    -- Decode an entire column
+    SELECT HEX(hce_decode(hce_col, 'custom-32-byte-key-here-xxxxx!!', 0, 0))
+    FROM items;
+    ```
+
+    The optional arguments to both functions are `key VARCHAR`, `level INT` (0 = universal, 1 = eu, 2 = en, 3 = numeric), and `mode INT` (0 = sealed, 1 = open, 2 = plain). Omitting them uses the compiled-in defaults.
+  </Tab>
+
+</Tabs>

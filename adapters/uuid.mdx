@@ -1,0 +1,109 @@
+---
+title: "Encoding UUIDs with HCE UuidAdapter"
+sidebarTitle: "UUID"
+description: "UuidAdapter encodes UUID v1, v4, v6, and v7 with HCE and extracts the embedded timestamp from v1, v6, and v7 to produce lexicographically sortable output."
+---
+
+`UuidAdapter` handles all common UUID versions — v1, v4, v6, and v7 — as 128-bit values. For v1, v6, and v7, the adapter automatically extracts the embedded timestamp, enabling `HceMode::Open` for lexicographically sortable identifiers. UUIDv4 carries no timestamp, so `Sealed` or `Plain` modes are the natural fit there.
+
+## Basic Usage
+
+Construct an `HceCodec` with `UuidAdapter`, then call `encode` with the raw 16-byte UUID. The codec handles bit-width configuration automatically.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+use hce_adapters::{HceCodec, UuidAdapter};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+);
+
+let codec = HceCodec::new(hce, UuidAdapter);
+
+// UUIDv7: 0195e3a0-7c2e-7b41-8f3d-9a6c1e0b4d27
+let uuid_bytes: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+
+let encoded = codec.encode(&uuid_bytes);
+// => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN" (example)
+
+let decoded = codec.decode(&encoded).unwrap();
+assert_eq!(&decoded[..16], &uuid_bytes[..]);
+```
+
+## Timestamp-Aware Encoding with UUIDv7
+
+UUIDv7 stores a 48-bit Unix millisecond timestamp in its most-significant bytes. When you use `HceMode::Open`, `UuidAdapter` extracts that timestamp automatically and HCE prefixes the encoded string with a sortable syllable group. The result is a human-readable identifier whose lexicographic order matches its creation time.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+use hce_adapters::{HceCodec, UuidAdapter};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Open,          // timestamp prefix enabled
+);
+
+let codec = HceCodec::new(hce, UuidAdapter);
+
+// Two UUIDv7 values created a second apart
+let uuid_earlier: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+let uuid_later: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xeb, 0x12, 0x00, 0x7b, 0x55,
+    0xaa, 0x01, 0xbb, 0x02, 0xcc, 0x03, 0xdd, 0x04,
+];
+
+let enc_earlier = codec.encode(&uuid_earlier);
+let enc_later   = codec.encode(&uuid_later);
+
+// Lexicographic order is preserved
+assert!(enc_earlier < enc_later);
+```
+
+The adapter reads bytes `[0..6]` of the UUIDv7 payload and interprets them as a big-endian 48-bit millisecond timestamp — no configuration required on your part.
+
+## Supported UUID Versions
+
+<CardGroup cols={2}>
+  <Card title="v1 — Gregorian timestamp" icon="clock">
+    Encodes a 60-bit timestamp counting 100-nanosecond intervals from the Gregorian
+    epoch (15 October 1582). `UuidAdapter` converts this to a Unix millisecond value
+    for use with `HceMode::Open`.
+  </Card>
+  <Card title="v4 — Random" icon="shuffle">
+    Carries no timestamp. `UuidAdapter` still encodes and decodes v4 UUIDs losslessly
+    as 128-bit values. Use `HceMode::Sealed` or `HceMode::Plain` — `Open` mode will
+    not produce meaningful sort order.
+  </Card>
+  <Card title="v6 — Reordered timestamp" icon="arrow-up-a-z">
+    Reorders the v1 timestamp fields so that UUIDv6 values sort naturally as opaque
+    strings. `UuidAdapter` extracts the same 60-bit Gregorian timestamp as v1 and
+    converts it to Unix milliseconds.
+  </Card>
+  <Card title="v7 — Unix millisecond" icon="bolt">
+    Stores a 48-bit Unix millisecond timestamp in the most-significant bytes.
+    Recommended for new systems. Pairs naturally with `HceMode::Open` for
+    fully sortable, encrypted, human-readable identifiers.
+  </Card>
+</CardGroup>
+
+<Note>
+  UUID versions 2, 3, 5, and 8 contain no timestamp field that `UuidAdapter` recognises.
+  They are still encoded and decoded correctly as raw 128-bit values; `extract_timestamp`
+  returns `None` for those versions, so `HceMode::Open` will not prepend a timestamp prefix.
+</Note>
+
+## Installation
+
+```toml
+[dependencies]
+hce-adapters = "0.1"
+```

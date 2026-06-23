@@ -1,0 +1,102 @@
+---
+title: "HCE Elixir SDK: Rustler NIF for Elixir and Phoenix"
+sidebarTitle: "Elixir"
+description: "Use the HCE Elixir binding — a Rustler NIF — to encode and decode identifiers in Elixir and Phoenix with a simple Mix dependency and functional API."
+---
+
+The HCE Elixir binding is a Rustler NIF (Native Implemented Function) that calls directly into the compiled Rust library. You add it as a Mix dependency, compile the native extension once, and use the `Hce` module like any other Elixir module. The API follows Elixir conventions — `new/3` returns `{:ok, codec}`, `decode/2` returns `{:ok, binary} | {:error, term}`, and configuration functions accept and return the codec struct for easy piping.
+
+## Prerequisites
+
+Build the `hce-ffi` shared library before running `mix deps.compile`. The Rustler NIF links against it at compile time.
+
+```bash
+cargo build -p hce-ffi --release
+```
+
+## Installation
+
+Add the dependency to your `mix.exs` file and run `mix deps.get`.
+
+```elixir
+def deps do
+  [{:hce, path: "bindings/elixir"}]
+end
+```
+
+## API
+
+### Creating a codec
+
+```elixir
+Hce.new(key, level \\ :universal, mode \\ :sealed)
+```
+
+`key` is a binary string. `level` is one of `:universal`, `:eu`, `:en`, or `:numeric`. `mode` is one of `:sealed`, `:open`, or `:plain`. Returns `{:ok, %Hce{}}` on success or `{:error, reason}` if the key is missing for an encrypted mode.
+
+### Encoding and decoding
+
+```elixir
+Hce.encode(codec, data :: binary) :: String.t()
+Hce.decode(codec, input :: String.t()) :: {:ok, binary} | {:error, term}
+```
+
+### Configuration functions
+
+All configuration functions accept the codec as the first argument and return the updated codec, so you can pipe them.
+
+```elixir
+Hce.with_bit_width(codec, bits :: integer)
+Hce.with_case(codec, :upper | :lower)
+Hce.with_separator(codec, sep :: String.t())
+Hce.with_chunk_none(codec)
+Hce.with_timestamp_config(codec, epoch_ms :: integer, :second | :minute | :hour | :day | :week | :month)
+```
+
+### Releasing resources
+
+```elixir
+Hce.destroy(codec)
+```
+
+Call `Hce.destroy/1` when you are done with a codec to release its native memory immediately.
+
+## Example
+
+The example below encodes a 16-byte UUID, decodes it back, and prints both results.
+
+```elixir
+{:ok, h} = Hce.new("32-byte-key-here-xxxxxx!!", :universal, :sealed)
+
+uuid = <<1, 149, 227, 160, 124, 46, 123, 65, 143, 61, 154, 108, 30, 11, 77, 39>>
+encoded = Hce.encode(h, uuid)
+IO.puts(encoded)
+# => PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN
+
+{:ok, decoded} = Hce.decode(h, encoded)
+IO.inspect(decoded, base: :hex)
+# => <<1, 149, 227, 160, 124, 46, 123, 65, 143, 61, 154, 108, 30, 11, 77, 39>>
+
+Hce.destroy(h)
+```
+
+<Warning>
+  You must call `Hce.destroy/1` to release the native resource when you are finished
+  with a codec. The BEAM garbage collector does not manage Rust-allocated memory, so
+  codecs that are never destroyed will leak for the lifetime of the VM node.
+</Warning>
+
+<Tip>
+  In a Phoenix controller, pattern-match on `Hce.decode/2` directly in the function
+  head or with a `with` chain to return structured error responses without nested
+  `case` blocks:
+
+  ```elixir
+  with {:ok, codec} <- Hce.new(key, :universal, :sealed),
+       {:ok, binary_id} <- Hce.decode(codec, hce_param) do
+    render(conn, :show, item: Repo.get!(Item, binary_id))
+  else
+    {:error, reason} -> conn |> put_status(:bad_request) |> json(%{error: reason})
+  end
+  ```
+</Tip>

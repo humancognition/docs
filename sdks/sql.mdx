@@ -1,0 +1,73 @@
+---
+title: "HCE MySQL UDF: Encode Identifiers in SQL Queries"
+sidebarTitle: "SQL"
+description: "Install the HCE MySQL and MariaDB UDFs to encode and decode binary identifier columns directly inside SQL queries without application-layer code."
+---
+
+HCE provides MySQL and MariaDB user-defined functions (UDFs) so you can encode and decode identifiers directly within SQL queries — no application-layer code required. Once you compile and register the UDF shared library, `hce_encode` and `hce_decode` are available as first-class SQL functions that you can use in `SELECT` lists, `WHERE` clauses, and computed column definitions.
+
+## Build and Install
+
+Compile the UDF shared library against your MySQL installation and the pre-built `hce-ffi` release artifact, then copy it to the MySQL plugin directory.
+
+```bash
+cc -shared -fPIC -I $(mysql_config --include) \
+   -o libhce_udf.so hce_udf.c \
+   -L ../../target/release -lhce_ffi
+cp libhce_udf.so $(mysql_config --plugindir)/
+```
+
+After copying the library, register both functions in your MySQL or MariaDB instance.
+
+```sql
+CREATE FUNCTION hce_encode RETURNS STRING SONAME 'libhce_udf.so';
+CREATE FUNCTION hce_decode RETURNS STRING SONAME 'libhce_udf.so';
+```
+
+You only need to run the `CREATE FUNCTION` statements once per server. The functions persist across restarts.
+
+## Function Reference
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `hce_encode` | `hce_encode(data BLOB, key? VARCHAR, level? INT, mode? INT)` | `VARCHAR` |
+| `hce_decode` | `hce_decode(hce_str VARCHAR, key? VARCHAR, level? INT, mode? INT)` | `BINARY(16)` |
+
+**Level constants:** `0` = universal, `1` = eu, `2` = en, `3` = numeric
+
+**Mode constants:** `0` = sealed, `1` = open, `2` = plain
+
+## Usage Examples
+
+```sql
+-- Encode a UUID stored as BINARY(16)
+SELECT hce_encode(UNHEX('0195e3a07c2e7b418f3d9a6c1e0b4d27'));
+-- => 'PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN'
+
+-- Decode back to the original binary value
+SELECT HEX(hce_decode('PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN'));
+-- => '0195E3A07C2E7B418F3D9A6C1E0B4D27'
+
+-- Encode an entire column with a custom key, level, and mode
+SELECT hce_encode(id_col, 'custom-32-byte-key-here-xxxxx!!', 0, 0)
+FROM users;
+
+-- Decode an entire column
+SELECT HEX(hce_decode(hce_col, 'custom-32-byte-key-here-xxxxx!!', 0, 0))
+FROM users;
+```
+
+<Note>
+  The `key`, `level`, and `mode` parameters are optional. When you omit them, the UDF
+  uses the defaults: no key, universal level, and sealed mode. Note that omitting the
+  key while using sealed mode (the default) will produce an error — you must either
+  supply a key or explicitly pass `2` as the mode to use plain encoding.
+</Note>
+
+<Warning>
+  Avoid hardcoding encryption keys as string literals in SQL queries. Keys written
+  directly into queries appear in query logs, slow-query logs, `PROCESSLIST` output,
+  and replication binlogs. Instead, store the key in a MySQL user variable set by your
+  application at session open time, or inject it through a prepared statement parameter
+  so it never appears as a literal in any log.
+</Warning>

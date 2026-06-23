@@ -1,0 +1,172 @@
+---
+title: "ULID, Snowflake, Xid, and ObjectId Adapters"
+sidebarTitle: "ULID, Snowflake & Xid"
+description: "HCE adapters for ULID, Twitter/Discord Snowflakes, MongoDB ObjectIds, and Xid handle each format's byte layout and timestamp extraction out of the box."
+---
+
+Beyond UUIDs, HCE provides dedicated adapters for ULID, Twitter/Discord Snowflakes, MongoDB ObjectIds, and Xid. Each adapter understands its format's byte layout and can extract an embedded timestamp, so you can pair any of them with `HceMode::Open` for sortable, human-readable output without any manual byte wrangling.
+
+<Tabs>
+  <Tab title="ULID">
+    ULIDs are 128-bit identifiers encoded as 26-character Crockford base32 strings. The first 48 bits store a Unix millisecond timestamp, making ULIDs naturally sortable. `UlidAdapter` expects the raw 16-byte binary representation of a ULID — not the base32 string — and extracts the timestamp from the first 6 bytes.
+
+    ```rust
+    use hce_core::{Hce, HceMode, LanguageLevel};
+    use hce_adapters::{HceCodec, UlidAdapter};
+
+    let hce = Hce::new(
+        Some(b"32-byte-secret-key-here-xxxxxx!!"),
+        LanguageLevel::Universal,
+        HceMode::Open,  // timestamp prefix for sortable output
+    );
+
+    let codec = HceCodec::new(hce, UlidAdapter);
+
+    // Raw 16-byte ULID (binary, not base32 string)
+    let mut ulid_bytes = [0u8; 16];
+    ulid_bytes[..6].copy_from_slice(&[0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e]);
+    // remaining 10 bytes are random data
+    ulid_bytes[6..].copy_from_slice(&[0x3f, 0x7b, 0x41, 0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d]);
+
+    let encoded = codec.encode(&ulid_bytes);
+    let decoded = codec.decode(&encoded).unwrap();
+    assert_eq!(&decoded[..16], &ulid_bytes[..]);
+    ```
+
+    <Note>
+      Pass the binary ULID bytes, not the 26-character base32 string. If you have a base32 ULID
+      string, decode it to its 16-byte binary form first using a ULID library before passing it
+      to `UlidAdapter`.
+    </Note>
+  </Tab>
+
+  <Tab title="Snowflake">
+    Snowflake IDs are 64-bit integers used by Twitter, Discord, and other high-throughput platforms. The upper 41 bits encode a platform-specific millisecond timestamp offset from a custom epoch. `SnowflakeAdapter` accepts the raw 8-byte big-endian representation and reconstructs the absolute Unix millisecond timestamp using the configured epoch.
+
+    ```rust
+    use hce_core::{Hce, HceMode, LanguageLevel};
+    use hce_adapters::{HceCodec, SnowflakeAdapter};
+
+    // Use SnowflakeAdapter::twitter() for the Twitter epoch (1288834974657 ms)
+    // Use SnowflakeAdapter::discord() for the Discord epoch (1420070400000 ms)
+    // Use SnowflakeAdapter::new(epoch_ms) for a custom epoch
+    let adapter = SnowflakeAdapter::twitter();
+
+    let hce = Hce::new(
+        Some(b"32-byte-secret-key-here-xxxxxx!!"),
+        LanguageLevel::Universal,
+        HceMode::Open,  // timestamp prefix for sortable output
+    );
+
+    let codec = HceCodec::new(hce, adapter);
+
+    // 64-bit Snowflake as 8 big-endian bytes
+    let snowflake_bytes: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0];
+
+    let encoded = codec.encode(&snowflake_bytes);
+    let decoded = codec.decode(&encoded).unwrap();
+    // decoded is 16 bytes; the Snowflake value occupies bytes [8..16]
+    assert_eq!(&decoded[8..16], &snowflake_bytes[..]);
+    ```
+
+    <Warning>
+      Twitter and Discord use different custom epochs. Construct the adapter with
+      `SnowflakeAdapter::twitter()`, `SnowflakeAdapter::discord()`, or
+      `SnowflakeAdapter::new(your_epoch_ms)` to ensure timestamps are computed correctly.
+      Mixing epochs will produce valid encodings but incorrect sort order.
+    </Warning>
+  </Tab>
+
+  <Tab title="MongoDB ObjectId">
+    MongoDB ObjectIds are 12-byte (96-bit) values whose first 4 bytes store a Unix second timestamp. `ObjectIdAdapter` extracts that 4-byte prefix and converts it to milliseconds for use with `HceMode::Open`, giving you sortable HCE strings without any additional configuration.
+
+    ```rust
+    use hce_core::{Hce, HceMode, LanguageLevel};
+    use hce_adapters::{HceCodec, ObjectIdAdapter};
+
+    let hce = Hce::new(
+        Some(b"32-byte-secret-key-here-xxxxxx!!"),
+        LanguageLevel::Universal,
+        HceMode::Open,  // timestamp prefix for sortable output
+    );
+
+    let codec = HceCodec::new(hce, ObjectIdAdapter);
+
+    // 12-byte MongoDB ObjectId
+    let object_id: [u8; 12] = [
+        0x67, 0x5a, 0x1b, 0x2c,  // 4-byte Unix timestamp (seconds)
+        0x8f, 0x3d, 0x9a, 0x6c,  // machine id + process id
+        0x1e, 0x0b, 0x4d, 0x27,  // 3-byte incrementing counter
+    ];
+
+    let encoded = codec.encode(&object_id);
+    let decoded = codec.decode(&encoded).unwrap();
+    // decoded is 16 bytes; ObjectId occupies bytes [4..16]
+    assert_eq!(&decoded[4..16], &object_id[..]);
+    ```
+
+    The 96-bit domain means encoded ObjectIds produce 11-syllable HCE strings — shorter than 128-bit UUID encodings.
+  </Tab>
+
+  <Tab title="Xid">
+    Xid is a 12-byte globally unique identifier used primarily in Go applications, defined by the [`github.com/rs/xid`](https://github.com/rs/xid) library. Like MongoDB ObjectId, its first 4 bytes store a Unix second timestamp. `XidAdapter` extracts that timestamp and converts it to milliseconds, so `HceMode::Open` produces sortable output.
+
+    ```rust
+    use hce_core::{Hce, HceMode, LanguageLevel};
+    use hce_adapters::{HceCodec, XidAdapter};
+
+    let hce = Hce::new(
+        Some(b"32-byte-secret-key-here-xxxxxx!!"),
+        LanguageLevel::Universal,
+        HceMode::Open,  // timestamp prefix for sortable output
+    );
+
+    let codec = HceCodec::new(hce, XidAdapter);
+
+    // 12-byte Xid
+    let xid_bytes: [u8; 12] = [
+        0x67, 0x5a, 0x1b, 0x2c,  // 4-byte Unix timestamp (seconds)
+        0x8f, 0x3d, 0x9a, 0x6c,  // machine id
+        0x1e, 0x0b, 0x4d, 0x27,  // process id + counter
+    ];
+
+    let encoded = codec.encode(&xid_bytes);
+    let decoded = codec.decode(&encoded).unwrap();
+    // decoded is 16 bytes; Xid occupies bytes [4..16]
+    assert_eq!(&decoded[4..16], &xid_bytes[..]);
+    ```
+
+    Xid and MongoDB ObjectId share the same 12-byte, 96-bit structure, so both adapters produce 11-syllable HCE strings and behave identically from HCE's perspective. Choose the adapter that matches the library generating your identifiers.
+  </Tab>
+</Tabs>
+
+## Using RawAdapter for Other Identifier Types
+
+If you work with an identifier format not listed above, `RawAdapter` lets you encode any arbitrary byte slice by specifying the bit width explicitly.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+use hce_adapters::{HceCodec, RawAdapter};
+
+let hce = Hce::new(None, LanguageLevel::Universal, HceMode::Plain);
+
+// Encode a 64-bit custom identifier
+let codec = HceCodec::new(hce, RawAdapter::new(64));
+
+let my_id: [u8; 8] = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0];
+let encoded = codec.encode(&my_id);
+let decoded = codec.decode(&encoded).unwrap();
+```
+
+<Note>
+  `RawAdapter::new(bits)` accepts any value from 16 to 128. Values above 128 are clamped to 128.
+  `RawAdapter` never extracts a timestamp, so `HceMode::Open` will not prepend a timestamp prefix
+  when you use it — use `Sealed` or `Plain` mode instead.
+</Note>
+
+## Installation
+
+```toml
+[dependencies]
+hce-adapters = "0.1"
+```

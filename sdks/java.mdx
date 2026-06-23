@@ -1,0 +1,108 @@
+---
+title: "HCE Java SDK: JNA Bindings for Java and JVM"
+sidebarTitle: "Java"
+description: "Use the HCE Java binding to encode and decode binary identifiers via JNA, with full Maven and Gradle support for any JVM-based project."
+---
+
+The HCE Java binding uses JNA (Java Native Access) to call the Rust `hce-ffi` shared library directly from the JVM. It works with Maven, Gradle, and any JVM-based project — no JNI glue code required. You create an `HceCodec` instance, configure it with a builder-style fluent API, and call `encode` or `decode` on your binary identifiers.
+
+## Prerequisites
+
+Before you add the dependency, build the native shared library from the HCE repository and place it on the JVM library path.
+
+```bash
+cargo build -p hce-ffi --release
+cp target/release/libhce_ffi.so /usr/lib/   # Linux
+# cp target/release/libhce_ffi.dylib /usr/local/lib/  # macOS
+```
+
+JNA resolves the library by name (`hce_ffi`) at runtime using the system library path, so the file must be accessible before you run your application.
+
+## Installation
+
+Add JNA to your project. HCE ships the binding source directly — you only need JNA as a runtime dependency.
+
+<CodeGroup>
+
+```xml Maven
+<dependency>
+  <groupId>net.java.dev.jna</groupId>
+  <artifactId>jna</artifactId>
+  <version>5.16.0</version>
+</dependency>
+```
+
+```groovy Gradle
+implementation 'net.java.dev.jna:jna:5.16.0'
+```
+
+</CodeGroup>
+
+## Constructor and API
+
+Import `HceCodec` and choose a level and mode constant before constructing the codec.
+
+```java
+import com.github.humancognition.hce.HceCodec;
+
+// Level constants
+// HceCodec.UNIVERSAL  (0) — full phoneme vocabulary
+// HceCodec.EU         (1) — EU-language subset
+// HceCodec.EN         (2) — English subset
+// HceCodec.NUMERIC    (3) — digit-only output
+
+// Mode constants
+// HceCodec.SEALED  (0) — encrypted, key required
+// HceCodec.OPEN    (1) — timestamp-embedded, key required
+// HceCodec.PLAIN   (2) — no encryption
+
+HceCodec h = new HceCodec(byte[] key, int level, int mode);
+```
+
+### Core methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `encode(byte[] data)` | `String` | Encode bytes to an HCE string |
+| `decode(String input)` | `byte[]` | Decode an HCE string to original bytes |
+
+### Configuration methods
+
+Each method mutates the codec in place and returns `this`, so you can chain calls in a builder pattern.
+
+| Method | Description |
+|--------|-------------|
+| `withBitWidth(int bits)` | Set the domain bit width |
+| `withCase(int caseVal)` | `HceCodec.CASE_UPPER` or `CASE_LOWER` |
+| `withCheckSyllables(int n)` | Append *n* check syllables (1–8) |
+| `withSeparator(char sep)` | Set the chunk separator character |
+| `withChunkNone()` | Remove all separators |
+| `withChunkFixed(int charSize)` | Split output into fixed-width chunks |
+| `withChunkPattern(int... pattern)` | Split output with a custom repeating pattern |
+| `withTimestampConfig(long epochMs, int granularity)` | Embed a timestamp (Open mode only) |
+
+## Example
+
+The example below encodes a UUID-shaped byte array and then decodes it back to verify the round-trip.
+
+```java
+import com.github.humancognition.hce.HceCodec;
+
+byte[] key  = "32-byte-secret-key-here-xxxxxx!!".getBytes();
+byte[] uuid = {1, -107, -29, -96, 124, 46, 123, 65, -113, 61, -102, 108, 30, 11, 77, 39};
+
+try (HceCodec h = new HceCodec(key, HceCodec.UNIVERSAL, HceCodec.SEALED)) {
+    String encoded = h.encode(uuid);
+    System.out.println(encoded);
+    // => PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN
+
+    byte[] decoded = h.decode(encoded);
+    // decoded equals uuid
+}
+```
+
+<Warning>
+  `HceCodec` holds a native pointer to a Rust-allocated object. Always wrap it in a
+  try-with-resources block, or call `close()` explicitly when you are finished. Failing
+  to do so will leak native memory for the lifetime of the JVM process.
+</Warning>

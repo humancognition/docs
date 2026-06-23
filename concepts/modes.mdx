@@ -1,0 +1,128 @@
+---
+title: "HCE Encoding Modes: Sealed, Open, and Plain Compared"
+sidebarTitle: "Modes"
+description: "Sealed, Open, and Plain modes control HCE's encryption strength, timestamp sortability, and integrity checking. Learn when to use each mode."
+---
+
+HCE gives you three modes that control how your encoded strings are protected and structured. Sealed mode provides full confidentiality with HMAC-SHA256 integrity. Open mode adds a timestamp prefix so strings sort chronologically. Plain mode skips encryption entirely and uses a lightweight CRC check instead. Choosing the right mode depends on your security requirements and whether you need the output to be lexicographically sortable.
+
+## Mode Comparison
+
+| Mode | Check | Timestamp prefix | Purpose |
+|------|-------|-----------------|---------|
+| `Sealed` | HMAC-SHA256 | No | Full confidentiality and integrity |
+| `Open` | HMAC-SHA256 | Yes (from input) | Sortable, timestamp-prefixed identifiers |
+| `Plain` | CRC | No | No encryption; CRC integrity only |
+
+---
+
+## Sealed Mode
+
+Sealed mode is the default choice for any identifier that should be opaque to observers. The input bytes are encrypted with the Feistel FPE cipher, and the check syllables are derived from an HMAC-SHA256 of your key and the encoded body. Nothing about the plaintext leaks through the output string.
+
+**When to use it:** User IDs, session tokens, order numbers, internal record references — any identifier where you do not want the encoded string to reveal ordering or timing information.
+
+**What it guarantees:**
+- The output reveals nothing about the input without your key.
+- Any modification to the string (even a single character swap) is detected on decode.
+- Two identical inputs always produce the same output with the same key (deterministic).
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+);
+
+let uuid_bytes: [u8; 16] = [
+    0xf8, 0x1d, 0x4f, 0xae, 0x7d, 0xec, 0x4d, 0x10,
+    0xa7, 0x65, 0x00, 0xa0, 0xc9, 0x1e, 0x6b, 0xf6,
+];
+
+let id = hce.encode(&uuid_bytes);
+// e.g. "BRENKAL-FLOTREN-SMIREN-KLAFREN-BLODREN-KU"
+
+let decoded = hce.decode(&id).unwrap();
+assert_eq!(decoded, uuid_bytes.to_vec());
+```
+
+---
+
+## Open Mode
+
+Open mode is designed for distributed systems that need both encryption and **chronological sort order**. When you encode a UUID v7 or any timestamp-bearing identifier, HCE extracts the timestamp component and prepends a short sortable prefix to the output string. The rest of the encoding — FPE encryption and HMAC-SHA256 check syllables — is identical to Sealed mode.
+
+**When to use it:** Time-ordered distributed IDs (similar to UUIDv7 or ULID), event logs, audit trails, or any context where you want to sort encoded identifiers without decrypting them.
+
+**What it guarantees:**
+- Lexicographic order of encoded strings matches chronological order of the underlying identifiers.
+- The payload is still fully encrypted; only relative ordering is revealed.
+- HMAC-SHA256 integrity check — the same tamper detection as Sealed mode.
+
+<Tip>
+  Open mode is ideal for distributed ID generation where multiple services emit identifiers independently. Because the output is lexicographically sortable, you can merge streams from different services and maintain a correct time order without a central coordinator — similar to UUIDv7 but with a human-readable, pronounceable representation.
+</Tip>
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Open,
+);
+
+// UUID v7 bytes carry a millisecond timestamp in the high bits
+let uuid_v7: [u8; 16] = [
+    0x01, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+    0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27,
+];
+
+let id = hce.encode(&uuid_v7);
+// Starts with a timestamp prefix, e.g. "K-PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN-BU"
+// The leading "K" prefix encodes the timestamp epoch bucket
+
+let decoded = hce.decode(&id).unwrap();
+assert_eq!(decoded, uuid_v7.to_vec());
+```
+
+---
+
+## Plain Mode
+
+Plain mode disables encryption entirely. The Feistel cipher still runs — using a fixed, published key — but because the key is not secret, the output does not provide confidentiality. Integrity is checked with a CRC rather than HMAC-SHA256. You do not need to provide a key when constructing the codec in Plain mode.
+
+**When to use it:** Development and debugging, non-sensitive display codes, human-readable serial numbers where privacy is not a concern and you only want a stable, reproducible encoding.
+
+**What it guarantees:**
+- Deterministic output with no key required.
+- CRC integrity check catches accidental corruption (e.g. a typo in a manually transcribed code).
+- Self-recovery is **not** available in Plain mode.
+
+<Warning>
+  Plain mode provides **no encryption**. Anyone who receives the encoded string can verify the CRC check without possessing any secret. Do not use Plain mode for user-facing identifiers, authentication tokens, or any value that could reveal sensitive information if decoded. Use Sealed or Open mode for all production identifiers that require confidentiality.
+</Warning>
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+// No key required for Plain mode — pass None
+let hce = Hce::new(
+    None,
+    LanguageLevel::Universal,
+    HceMode::Plain,
+);
+
+let serial: [u8; 16] = [
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a,
+];
+
+let code = hce.encode(&serial);
+// Reproducible without any key
+
+let decoded = hce.decode(&code).unwrap();
+assert_eq!(decoded, serial.to_vec());
+```

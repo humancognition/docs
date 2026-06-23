@@ -1,0 +1,96 @@
+---
+title: "HCE Rust SDK: hce-core API Reference"
+sidebarTitle: "Rust"
+description: "Use hce-core, the canonical Rust crate, to encode and decrypt binary identifiers into pronounceable strings. Full API reference with builder configuration."
+---
+
+`hce-core` is the canonical Rust crate that all other language bindings wrap. You add it to your `Cargo.toml`, construct an `Hce` struct with a key and language level, and call `encode`/`decode` directly — no runtime or daemon required.
+
+## Installation
+
+Add the following to your `Cargo.toml`. Pull in `hce-fpe` to select a cipher, and `hce-adapters` for first-class UUID, ULID, and Snowflake support.
+
+```toml
+[dependencies]
+hce-core = "0.1"
+hce-fpe = "0.1"       # for cipher selection
+hce-adapters = "0.1"  # for UUID/ULID/etc.
+```
+
+## Constructor and Core API
+
+Construct an `Hce` codec with `Hce::new`, then chain builder methods to configure output format before encoding.
+
+```rust
+let hce = Hce::new(key: Option<&[u8]>, level: LanguageLevel, mode: HceMode);
+```
+
+<ParamField path="key" type="Option<&[u8]>">
+  Encryption key; 32 bytes recommended. Pass `None` when using `HceMode::Plain` — any other mode requires a key.
+</ParamField>
+
+<ParamField path="level" type="LanguageLevel">
+  Phoneme set used for encoding. Choose `Universal` for broadest cross-language readability, or `Eu`, `En`, or `Numeric` for region-specific or digit-style output.
+</ParamField>
+
+<ParamField path="mode" type="HceMode">
+  Encryption and integrity strategy. `Sealed` gives full confidentiality with HMAC integrity; `Open` adds a sortable timestamp prefix; `Plain` applies CRC-only integrity with no encryption.
+</ParamField>
+
+### Core Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `encode(&[u8])` | `String` | Encrypt and encode bytes to an HCE string |
+| `decode(&str)` | `Result<Vec<u8>, HceError>` | Decode and decrypt; returns `Err` on integrity failure |
+| `recover(&str)` | `Result<RecoveryResult, HceError>` | Attempt phoneme confusion correction |
+
+### Configuration Methods
+
+Chain these builder methods on your `Hce` instance before calling `encode`. Each method returns `Self` so you can compose them in a single expression.
+
+| Method | Description |
+|--------|-------------|
+| `with_bit_width(u32)` | Set cipher domain size (16–128 bits; default 128) |
+| `with_modulus(u128)` | Use a custom modulus domain instead of bit width |
+| `with_case(HceCase)` | `HceCase::Upper` or `HceCase::Lower` (default `Upper`) |
+| `with_check_syllables(usize)` | HMAC check syllables 1–8 (default 1) |
+| `with_separator(char)` | Separator between chunks (default `'-'`) |
+| `with_chunk_none()` | No separator (contiguous string) |
+| `with_chunk_fixed(usize)` | Fixed syllable count per chunk |
+| `with_chunk_pattern(&[usize])` | Custom syllable-per-chunk pattern |
+| `with_timestamp_config(i64, TsGranularity)` | Enable timestamp prefix (Open mode only) |
+| `with_cipher(Arc<dyn Fpe>)` | Inject a custom format-preserving cipher |
+
+## Error Reference
+
+`HceError` is returned by `decode` and `recover` when the input cannot be processed.
+
+| Error | Meaning |
+|-------|---------|
+| `NormalizeError` | Input string could not be parsed or normalized |
+| `KeyRequired` | `Sealed` or `Open` mode used without a key |
+| `RecoveryNotSupported` | `recover` called but not available for this configuration |
+| `IntegrityFailure` | Check-syllable HMAC or CRC verification failed |
+
+## Full Example
+
+The example below encodes a raw 16-byte UUID, then round-trips it back through `decode` and asserts equality.
+
+```rust
+use hce_core::{Hce, HceCase, HceMode, LanguageLevel, TsGranularity};
+
+fn main() {
+    let key = b"32-byte-secret-key-here-xxxxxx!!";
+    let hce = Hce::new(Some(key), LanguageLevel::Universal, HceMode::Sealed)
+        .with_check_syllables(2)
+        .with_case(HceCase::Lower)
+        .with_chunk_fixed(4);
+
+    let uuid_bytes = [0x01u8, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
+                      0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27];
+    let encoded = hce.encode(&uuid_bytes);
+    let decoded = hce.decode(&encoded).unwrap();
+    assert_eq!(decoded, uuid_bytes);
+}
+```

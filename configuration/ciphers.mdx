@@ -1,0 +1,158 @@
+---
+title: "HCE Cipher Selection and Custom FPE Injection"
+sidebarTitle: "Ciphers"
+description: "Choose between the built-in Feistel and Shuffle ciphers, or inject your own format-preserving encryption implementation into the HCE pipeline."
+---
+
+HCE uses format-preserving encryption (FPE) internally so that ciphertext stays within the same numeric domain as the plaintext — which is what makes the codec both reversible and consistently sized. You can choose between two built-in ciphers shipped with `hce-fpe`, or supply your own implementation by injecting any type that satisfies the `Fpe` trait. This page explains each option and when to reach for it.
+
+## Built-in ciphers
+
+| Cipher | Kind | Rounds | Notes |
+|---|---|---|---|
+| Feistel | HMAC-SHA256 | 8 | Default; strong cryptographic security; requires a key |
+| Shuffle | Lightweight | 4 | Faster; no key; structural permutation only — not cryptographically secure |
+
+### Feistel (default)
+
+The Feistel cipher runs 8 rounds of HMAC-SHA256. It is the default when you construct `Hce` with a key, so you do not need to configure it explicitly. You can also select it explicitly via `hce_fpe::build_cipher`.
+
+<CodeGroup>
+
+```rust Implicit (recommended)
+use hce_core::{Hce, HceMode, LanguageLevel};
+
+// Feistel is used automatically when a key is provided
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+);
+```
+
+```rust Explicit selection
+use hce_core::{Domain, Hce, HceMode, LanguageLevel};
+use hce_fpe::{build_cipher, CipherKind};
+use std::sync::Arc;
+
+let key = b"32-byte-secret-key-here-xxxxxx!!";
+
+let mut hce = Hce::new(Some(key), LanguageLevel::Universal, HceMode::Sealed);
+let domain = hce.domain();
+let cipher = build_cipher(CipherKind::Feistel8, Some(key), domain);
+
+let hce = hce.with_cipher(cipher);
+```
+
+</CodeGroup>
+
+### Shuffle
+
+The Shuffle cipher applies 4 rounds of deterministic domain-preserving permutation. It does not accept a key.
+
+<Warning>
+Shuffle mode does not use a key and provides only structural shuffling — it is **not** cryptographically secure. Use it only with `Plain` mode, for non-sensitive identifiers, or in contexts where confidentiality is not required.
+</Warning>
+
+```rust
+use hce_core::{Domain, Hce, HceMode, LanguageLevel};
+use hce_fpe::{build_cipher, CipherKind};
+
+let mut hce = Hce::new(None, LanguageLevel::Universal, HceMode::Plain);
+let domain = hce.domain();
+let cipher = build_cipher(CipherKind::Shuffle4, None, domain);
+
+let hce = hce.with_cipher(cipher);
+```
+
+## Custom FPE injection
+
+If neither built-in cipher fits your requirements — for example, you need FF3-1, AES-SIV, or a hardware-backed cipher — you can implement the `Fpe` trait and inject it directly.
+
+### The `Fpe` trait
+
+Your custom cipher must implement the following two methods. Both operate on `u128` values within the configured domain.
+
+```rust
+pub trait Fpe: Send + Sync {
+    /// Encrypt `plain` using `tweak` as additional context.
+    fn encrypt(&self, plain: u128, tweak: &[u8]) -> u128;
+
+    /// Decrypt `cipher` using `tweak` as additional context.
+    fn decrypt(&self, cipher: u128, tweak: &[u8]) -> u128;
+}
+```
+
+The `tweak` slice carries domain metadata (level byte, mode byte, domain width) and is provided automatically by HCE — your implementation receives it as-is. The returned value must stay within the domain's range; values outside the domain will cause encode/decode failures.
+
+### Injecting a custom cipher
+
+Wrap your implementation in an `Arc` and pass it to `with_cipher`.
+
+```rust
+use hce_core::{Domain, Fpe, Hce, HceMode, LanguageLevel};
+use std::sync::Arc;
+
+struct MyCipher {
+    key: [u8; 32],
+}
+
+impl Fpe for MyCipher {
+    fn encrypt(&self, plain: u128, tweak: &[u8]) -> u128 {
+        // your format-preserving encryption logic
+        plain // replace with real implementation
+    }
+
+    fn decrypt(&self, cipher: u128, tweak: &[u8]) -> u128 {
+        // your format-preserving decryption logic
+        cipher // replace with real implementation
+    }
+}
+
+let cipher = Arc::new(MyCipher { key: *b"32-byte-secret-key-here-xxxxxx!!" });
+
+let hce = Hce::new(
+    Some(b"32-byte-secret-key-here-xxxxxx!!"),
+    LanguageLevel::Universal,
+    HceMode::Sealed,
+)
+.with_cipher(cipher);
+```
+
+<Note>
+Custom cipher injection is only available through the Rust API. Language bindings (Python, Go, Java, etc.) expose cipher selection as the string values `"feistel"` and `"shuffle"` only.
+</Note>
+
+## CLI equivalents
+
+The `hce` CLI accepts a `--cipher` flag on both `encode` and `decode` subcommands.
+
+```bash
+# Encode with the Feistel cipher (explicit)
+hce encode --cipher feistel --key <hex-key> <hex-input>
+
+# Encode with the Shuffle cipher
+hce encode --cipher shuffle <hex-input>
+
+# Decode with the Feistel cipher
+hce decode --cipher feistel --key <hex-key> <hce-string>
+```
+
+## Python equivalent
+
+```python
+import hce
+
+# Feistel (explicit)
+h = hce.Hce(
+    key=b"32-byte-secret-key-here-xxxxxx!!",
+    level="universal",
+    mode="sealed",
+).with_cipher("feistel")
+
+# Shuffle (no key needed)
+h_shuffle = hce.Hce(
+    level="universal",
+    mode="plain",
+).with_cipher("shuffle")
+```

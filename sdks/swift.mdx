@@ -1,0 +1,103 @@
+---
+title: "HCE Swift SDK: Swift Package Manager Integration"
+sidebarTitle: "Swift"
+description: "Integrate the HCE Swift package via Swift Package Manager using C interop to encode and decode identifiers with a clean, chainable Swift API."
+---
+
+The HCE Swift package wraps the Rust `hce-ffi` C ABI through Swift's native C interop layer. You add it as a local Swift Package Manager dependency, link against `libhce_ffi`, and call `HceCodec` directly from Swift code — no bridging headers or Objective-C wrappers required. The API is fully type-safe, uses Swift enums for level and mode, and returns optionals so you can handle errors with standard `guard` and `if let` patterns.
+
+## Prerequisites
+
+Build the native library from the HCE repository and copy it to the system library path before using the Swift package.
+
+```bash
+cargo build -p hce-ffi --release
+cp target/release/libhce_ffi.dylib /usr/local/lib/
+```
+
+The Swift package resolves `libhce_ffi` at link time, so the dynamic library must be present on the linker search path during both the build and at runtime.
+
+## Installation
+
+Add the local package to your `Package.swift` manifest and declare the `Hce` dependency in the targets that need it.
+
+```swift
+dependencies: [
+    .package(path: "bindings/swift"),
+],
+targets: [
+    .target(name: "MyApp", dependencies: ["Hce"]),
+]
+```
+
+Run `swift build` after updating your manifest to resolve and compile the package.
+
+## Constructor
+
+Import `Hce` and choose a `Level` and `Mode` before constructing the codec. The initializer is failable — it returns `nil` if you pass an empty key with a mode that requires one.
+
+```swift
+import Hce
+
+// Level enum
+// .universal — full phoneme vocabulary
+// .eu        — EU-language subset
+// .en        — English subset
+// .numeric   — digit-only output
+
+// Mode enum
+// .sealed — encrypted, key required
+// .open   — timestamp-embedded, key required
+// .plain  — no encryption
+
+let h = HceCodec(key: Data?, level: Level, mode: Mode)
+```
+
+### Core methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `encode(Data)` | `String?` | Encode bytes to an HCE string |
+| `decode(String)` | `Data?` | Decode an HCE string to original bytes |
+| `recover(String)` | `Data?` | Attempt to decode with automatic error correction |
+
+### Configuration methods
+
+Each method returns `Self`, so you can chain the calls in a single expression.
+
+| Method | Description |
+|--------|-------------|
+| `withBitWidth(UInt32)` | Set the domain bit width |
+| `withModulus(UInt64)` | Set a custom domain modulus |
+| `withCipherFeistel(Data?)` | Use the Feistel cipher with an optional separate key |
+| `withCipherShuffle()` | Use the Shuffle cipher |
+| `withCase(CipherCase)` | `.upper` or `.lower` output casing |
+| `withCheckSyllables(Int)` | Append *n* check syllables (1–8) |
+| `withSeparator(Character)` | Set the chunk separator character |
+| `withChunkNone()` | Remove all separators |
+| `withChunkFixed(Int)` | Split output into fixed-width chunks |
+| `withChunkPattern([Int])` | Split output with a custom repeating pattern |
+| `withTimestampConfig(Int64, Granularity)` | Embed a timestamp (Open mode only) |
+
+## Example
+
+The example below encodes a 16-byte UUID and decodes it back, printing each byte as a two-character hex string.
+
+```swift
+import Hce
+
+let key  = "32-byte-secret-key-here-xxxxxx!!".data(using: .utf8)!
+let uuid = Data([1, 149, 227, 160, 124, 46, 123, 65, 143, 61, 154, 108, 30, 11, 77, 39])
+
+guard let h = HceCodec(key: key, level: .universal, mode: .sealed) else { return }
+
+if let encoded = h.encode(uuid) {
+    print(encoded)
+    // => PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN
+
+    if let decoded = h.decode(encoded) {
+        print(decoded.map { String(format: "%02x", $0) }.joined())
+        // => 0195e3a07c2e7b418f3d9a6c1e0b4d27
+    }
+}
+```

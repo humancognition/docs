@@ -1,0 +1,105 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "HCE",
+  "projectDescription": "A lossless, pronounceable, encrypted codec that reversibly transforms any binary identifier into a human-readable, format-preserving string.",
+  "theme": "luma",
+  "primaryColor": "#4F6CF7",
+  "lightColor": "#EEF1FE",
+  "darkColor": "#1E2A6E",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/how-it-works",
+              "concepts/modes",
+              "concepts/language-levels",
+              "concepts/self-recovery"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/chunking",
+              "configuration/ciphers",
+              "configuration/timestamps"
+            ]
+          },
+          {
+            "group": "Adapters",
+            "pages": [
+              "adapters/overview",
+              "adapters/uuid",
+              "adapters/ulid-snowflake-xid"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/commands"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Language SDKs",
+        "groups": [
+          {
+            "group": "Official SDKs",
+            "pages": [
+              "sdks/rust",
+              "sdks/python",
+              "sdks/javascript",
+              "sdks/go",
+              "sdks/java",
+              "sdks/swift",
+              "sdks/elixir",
+              "sdks/sql"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Format-preserving encryption: 128-bit input maps to ~50-character pronounceable output",
+    "Three modes: Sealed (confidential), Open (sortable/timestamped), Plain (CRC integrity only)",
+    "Four language levels: Universal, EU, EN, Numeric phoneme sets",
+    "Self-recovery: automatically corrects common phoneme confusions (m/n, al/an, etc.)",
+    "Configurable chunking: none, fixed, or custom pattern separators",
+    "Custom cipher injection: Feistel 8-round or Shuffle 4-round FPE",
+    "Multi-platform: Rust, Python, JS/WASM, Go, Java, Swift, Elixir, MySQL",
+    "Built-in adapters for UUID, ULID, MongoDB ObjectId, Snowflake, Xid"
+  ],
+  "publicApiSurface": [
+    "Hce::new(key, level, mode)",
+    "hce.encode(&[u8]) -> String",
+    "hce.decode(&str) -> Result<Vec<u8>, HceError>",
+    "hce.recover(&str) -> Result<RecoveryResult, HceError>",
+    "hce.with_bit_width(u32)",
+    "hce.with_modulus(u128)",
+    "hce.with_case(HceCase)",
+    "hce.with_check_syllables(usize)",
+    "hce.with_separator(char)",
+    "hce.with_chunk_none()",
+    "hce.with_chunk_fixed(usize)",
+    "hce.with_chunk_pattern(&[usize])",
+    "hce.with_timestamp_config(i64, TsGranularity)",
+    "hce.with_cipher(Arc<dyn Fpe>)",
+    "hce encode / decode / recover CLI commands",
+    "UuidAdapter, UlidAdapter, SnowflakeAdapter, ObjectIdAdapter, XidAdapter",
+    "HceCodec<A: Adapter> (hce-adapters)"
+  ]
+}

@@ -1,0 +1,75 @@
+---
+title: "HCE: Lossless Encrypted Identifiers Made Pronounceable"
+sidebarTitle: "Introduction"
+description: "HCE transforms UUIDs and other binary identifiers into encrypted, pronounceable strings you can speak aloud, type reliably, and decode back perfectly."
+---
+
+HCE is a lossless, encrypted codec that converts raw binary identifiers — UUIDs, ULIDs, Snowflakes, Xids, or any arbitrary byte sequence — into human-readable strings that are safe to say over a phone call, type into a support ticket, or display in a UI. Every encoded string is fully reversible back to its original bytes, protected by HMAC-SHA256 integrity checks, and shaped from real phonemic syllables so they read like pronounceable words rather than noise.
+
+## The Problem with Raw Identifiers
+
+A raw UUID like `0195e3a0-7c2e-7b41-8f3d-9a6c1e0b4d27` is difficult to communicate verbally without errors, leaks structural information (version, variant, timestamp bits), and offers no integrity guarantee when transcribed by hand. Hex strings are worse: every character is visually ambiguous (`0` vs `O`, `1` vs `l`), there is no checksum, and they carry no encryption whatsoever.
+
+HCE solves all three problems at once. You encode your identifier once, store or transmit the result, and decode it back whenever you need the original bytes — with cryptographic assurance that nobody tampered with it in transit.
+
+## Before and After
+
+```text
+Before  →  01 95 e3 a0 7c 2e 7b 41 8f 3d 9a 6c 1e 0b 4d 27
+After   →  PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN
+```
+
+The output is chunked with dashes for readability, uses only phonemically valid syllables, and decodes deterministically back to the original 16 bytes — no information lost, no guessing.
+
+## Three Core Properties
+
+### Encrypted
+
+HCE applies an 8-round HMAC-SHA256 Feistel Format-Preserving Encryption (FPE) cipher to your identifier before encoding it. The plaintext byte values are never visible in the output. In `Sealed` mode, the encoded string reveals nothing about the original identifier's structure. A built-in check syllable (derived from a final HMAC pass) ensures that any modification to the string is detected immediately on decode.
+
+### Pronounceable
+
+The syllable alphabet is built from real phoneme data sourced from PHOIBLE, a cross-linguistic database of phoneme inventories. The default `Universal` level uses 35 phonemic onsets and 20 vowel nuclei — consonant-vowel pairs that appear in at least 40% of surveyed languages worldwide — giving a radix of 700 per syllable. This means the output is genuinely pronounceable in most major languages, not just ASCII soup that happens to lack digits.
+
+### Lossless
+
+Encoding and decoding are perfect inverses. Every byte value in your input maps to a unique syllable sequence, and every valid HCE string maps back to exactly one byte sequence. There is no approximation, no truncation, and no collision. If the bytes matter — and they always do for identifiers — HCE keeps them intact.
+
+## Supported Identifier Types
+
+HCE operates on raw bytes, so any identifier format works. The `hce-adapters` crate provides first-class support for the most common types:
+
+| Identifier | Size | Notes |
+|------------|------|-------|
+| UUID v4 / v7 | 128 bits | Standard random and time-ordered UUIDs |
+| ULID | 128 bits | Lexicographically sortable; use `Open` mode to preserve sort order |
+| Snowflake | 64 bits | Twitter/Discord-style IDs; set `bit_width(64)` |
+| Xid | 96 bits | MongoDB ObjectId-compatible; set `bit_width(96)` |
+| Arbitrary bytes | 16–128 bits | Any fixed-width identifier in the supported range |
+
+## Modes at a Glance
+
+HCE ships with three operating modes. You choose the one that fits your use case:
+
+| Mode | Integrity | Encryption | Best For |
+|------|-----------|------------|----------|
+| `Sealed` | HMAC-SHA256 | ✅ Full FPE | Opaque IDs in APIs, customer-facing tokens |
+| `Open` | HMAC-SHA256 | ✅ Full FPE | Sortable identifiers with timestamp prefix |
+| `Plain` | CRC | ❌ None | Human-readable display with error detection only |
+
+## Where to Go Next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Encode and decode your first identifier in under five minutes with a working Rust example.
+  </Card>
+  <Card title="How It Works" icon="gear" href="/concepts/how-it-works">
+    Understand the Feistel FPE cipher, syllable alphabet construction, and check syllable mechanics.
+  </Card>
+  <Card title="Modes" icon="sliders" href="/concepts/modes">
+    Compare Sealed, Open, and Plain modes and learn which one belongs in your architecture.
+  </Card>
+  <Card title="Rust SDK" icon="code" href="/sdks/rust">
+    Full API reference for hce-core, hce-adapters, and hce-fpe with configuration examples.
+  </Card>
+</CardGroup>

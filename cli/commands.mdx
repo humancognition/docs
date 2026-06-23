@@ -1,0 +1,120 @@
+---
+title: "HCE CLI Command and Flag Reference"
+sidebarTitle: "Commands"
+description: "Complete reference for all hce CLI commands — encode, decode, and recover — with every flag, its type, default value, and a practical usage example."
+---
+
+The `hce` CLI provides three primary commands — `encode`, `decode`, and `recover` — each accepting flags to configure the codec. Every flag has a sensible default, so you can start with just `--key` and add options progressively as your use-case demands.
+
+## Commands
+
+<Accordion title="hce encode — encode hex bytes to an HCE string">
+  The `encode` command reads hex-encoded bytes (from a positional argument or stdin) and writes a pronounceable, encrypted HCE string to stdout. You must supply `--key` when using `sealed` or `open` mode; `plain` mode requires no key.
+
+  | Flag | Short | Type | Default | Description |
+  |------|-------|------|---------|-------------|
+  | `--key` | `-k` | string (hex) | none | Encryption key — required for `sealed` and `open` modes |
+  | `--level` | `-l` | `universal` / `eu` / `en` / `numeric` | `universal` | Phoneme language level used for syllable generation |
+  | `--mode` | `-m` | `sealed` / `open` / `plain` | `sealed` | Encryption mode: `sealed` = full confidentiality, `open` = sortable timestamp-prefixed, `plain` = CRC only |
+  | `--bits` | `-w` | u32 | `128` | Bit width of the encoded value (16–128) |
+  | `--modulus` | — | u128 | none | Custom domain modulus; overrides `--bits` when set |
+  | `--cipher` | — | `feistel` / `shuffle` | none | Override the default cipher (Feistel 8-round) |
+  | `--case` | — | `upper` / `lower` | `upper` | Output case for the HCE string |
+  | `--check-syllables` | — | usize | `1` | Number of HMAC check syllables appended for integrity |
+  | `--separator` | — | char | `-` | Character used to separate syllable chunks |
+  | `--chunk-none` | — | flag | off | Disable chunking entirely — output is one continuous string |
+  | `--chunk-fixed` | — | usize | none | Fixed chunk size in syllables |
+  | `--chunk-pattern` | — | comma-separated list | none | Custom syllable-per-chunk pattern, e.g. `3,4,4,3` |
+  | `--timestamp-epoch` | — | i64 | none | Epoch in milliseconds for `open` mode timestamp prefix |
+  | `--timestamp-granularity` | — | `second` / `minute` / `hour` / `day` / `week` / `month` | none | Timestamp precision for `open` mode |
+  | `[input]` | — | string (hex) | stdin | Hex bytes to encode; omit to read from stdin |
+
+  ```bash
+  # Encode a UUID using a freshly generated key
+  hce encode --key $(openssl rand -hex 32) 0195e3a07c2e7b418f3d9a6c1e0b4d27
+
+  # Plain mode (no encryption) with English syllable level
+  hce encode --level en --mode plain 0195e3a07c2e7b418f3d9a6c1e0b4d27
+
+  # Custom chunk pattern and sealed encryption
+  hce encode --key <hex> --chunk-pattern 3,4,4,3 0195e3a07c2e7b418f3d9a6c1e0b4d27
+
+  # Pipe hex bytes from stdin
+  echo "0195e3a07c2e7b418f3d9a6c1e0b4d27" | hce encode --key <hex>
+  ```
+</Accordion>
+
+<Accordion title="hce decode — decode an HCE string back to hex bytes">
+  The `decode` command accepts a quoted HCE string as a required positional argument and writes the original hex bytes to stdout. Pass the same `--key`, `--level`, `--mode`, and `--bits` values you used during encoding, or decoding will fail.
+
+  | Flag | Short | Type | Default | Description |
+  |------|-------|------|---------|-------------|
+  | `--key` | `-k` | string (hex) | none | Encryption key — required for `sealed` and `open` modes |
+  | `--level` | `-l` | `universal` / `eu` / `en` / `numeric` | `universal` | Must match the level used at encode time |
+  | `--mode` | `-m` | `sealed` / `open` / `plain` | `sealed` | Must match the mode used at encode time |
+  | `--bits` | `-w` | u32 | `128` | Bit width — must match the value used at encode time |
+  | `--modulus` | — | u128 | none | Custom domain modulus — must match if used at encode time |
+  | `--cipher` | — | `feistel` / `shuffle` | none | Override the default cipher — must match if used at encode time |
+  | `--check-syllables` | — | usize | `1` | Number of HMAC check syllables — must match encode value |
+  | `[input]` | — | string (HCE) | required | The HCE string to decode |
+
+  ```bash
+  hce decode --key <hex> "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
+  # => 0195e3a07c2e7b418f3d9a6c1e0b4d27
+  ```
+</Accordion>
+
+<Accordion title="hce recover — auto-correct a misheard or mistyped HCE string">
+  The `recover` command applies the HCE confusion matrix to a suspect HCE string and attempts to identify the intended syllable sequence. If a valid correction is found the command outputs the corrected hex bytes; if the input was already valid you receive the hex bytes followed by `(no correction needed)`.
+
+  | Flag | Short | Type | Default | Description |
+  |------|-------|------|---------|-------------|
+  | `--key` | `-k` | string (hex) | none | Encryption key — required for `sealed` and `open` modes |
+  | `--level` | `-l` | `universal` / `eu` / `en` / `numeric` | `universal` | Must match the level used at encode time |
+  | `--mode` | `-m` | `sealed` / `open` / `plain` | `sealed` | Must match the mode used at encode time |
+  | `--bits` | `-w` | u32 | `128` | Bit width — must match the value used at encode time |
+  | `[input]` | — | string (HCE) | required | The potentially misheard or mistyped HCE string |
+
+  ```bash
+  hce recover --key <hex> "PETREN-NISLORPEM-LAFLER-SRORGULGOLFUN-PREPLEN"
+  # => 0195e3a07c2e7b418f3d9a6c1e0b4d27
+  ```
+</Accordion>
+
+## Piping and Shell Integration
+
+You can chain standard Unix tools with `hce` to build lightweight identifier pipelines. The example below generates a random UUID-sized value, encodes it, stores the result, and later decodes it back — all without leaving the terminal.
+
+```bash
+#!/usr/bin/env bash
+export HCE_KEY=$(openssl rand -hex 32)
+
+# Generate 16 random bytes (128-bit UUID equivalent) and encode them
+RAW_HEX=$(openssl rand -hex 16)
+HCE_STRING=$(echo "$RAW_HEX" | hce encode --key "$HCE_KEY")
+
+echo "Encoded : $HCE_STRING"
+
+# Later, decode it back
+RECOVERED=$(hce decode --key "$HCE_KEY" "$HCE_STRING")
+echo "Decoded : $RECOVERED"
+
+# Verify round-trip
+if [ "$RAW_HEX" = "$RECOVERED" ]; then
+  echo "Round-trip OK"
+else
+  echo "Round-trip FAILED" >&2
+  exit 1
+fi
+```
+
+<Tip>
+  You can alias both commands with a key sourced from an environment variable so you never have to type `--key` manually:
+
+  ```bash
+  alias hce-encode='hce encode --key $HCE_KEY'
+  alias hce-decode='hce decode --key $HCE_KEY'
+  ```
+
+  Add these aliases to your `.bashrc` or `.zshrc` and set `HCE_KEY` in your shell profile or secrets manager. Every subsequent call to `hce-encode` and `hce-decode` will automatically pick up the key.
+</Tip>
