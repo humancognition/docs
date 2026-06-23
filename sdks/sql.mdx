@@ -4,7 +4,17 @@ sidebarTitle: "SQL"
 description: "Install the HCE MySQL and MariaDB UDFs to encode and decode binary identifier columns directly inside SQL queries without application-layer code."
 ---
 
-HCE provides MySQL and MariaDB user-defined functions (UDFs) so you can encode and decode identifiers directly within SQL queries — no application-layer code required. Once you compile and register the UDF shared library, `hce_encode` and `hce_decode` are available as first-class SQL functions that you can use in `SELECT` lists, `WHERE` clauses, and computed column definitions.
+HCE provides MySQL and MariaDB user-defined functions (UDFs) so you can encode and decode identifiers directly within SQL queries — no application-layer code required. Once you compile and register the UDF shared library, `hce_encode` and `hce_decode` are available as first-class SQL functions that you can use in `SELECT` lists, `WHERE` clauses, and computed column definitions. The UDF wraps the canonical `hce-core` Rust crate, so output strings are byte-for-byte identical to those produced by every other HCE binding — a row encoded by the database can be decoded by a Python, JavaScript, or Go service with the same key.
+
+## Why HCE
+
+HCE turns a 128-bit identifier (such as a `BINARY(16)` UUID column) into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so you can store HCE strings in `VARCHAR(n)` columns without length-checking logic.
+- **Encrypted.** In sealed and open modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in plain mode). A single character flip raises a SQL error on decode before any bytes are returned.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit — the same property that makes phone numbers easy to read back to a CS agent.
 
 ## Build and Install
 
@@ -31,13 +41,30 @@ You only need to run the `CREATE FUNCTION` statements once per server. The funct
 ## Function Reference
 
 | Function | Signature | Returns |
-|----------|-----------|---------|
+| --- | --- | --- |
 | `hce_encode` | `hce_encode(data BLOB, key? VARCHAR, level? INT, mode? INT)` | `VARCHAR` |
 | `hce_decode` | `hce_decode(hce_str VARCHAR, key? VARCHAR, level? INT, mode? INT)` | `BINARY(16)` |
 
-**Level constants:** `0` = universal, `1` = eu, `2` = en, `3` = numeric
+### Level constants
 
-**Mode constants:** `0` = sealed, `1` = open, `2` = plain
+| Value | Level | Phoneme inventory | Best for |
+| --- | --- | --- | --- |
+| `0` | universal | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `1` | eu | Universal plus EU-language consonant clusters | European product surfaces |
+| `2` | en | Adds English-specific clusters (`st`, `sp`, `sk`) | English-only audiences |
+| `3` | numeric | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
+
+See [language levels](/concepts/language-levels) for the full phoneme inventory of each level.
+
+### Mode constants
+
+| Value | Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- | --- |
+| `0` | sealed | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses |
+| `1` | open | Feistel FPE | HMAC-SHA256 | Yes | Internal logs with sortable timestamp prefix |
+| `2` | plain | Fixed shuffle | CRC | No | base64-style use without secrets |
+
+`0` and `1` produce different output for the same input because the mode is mixed into the cipher tweak. `1` (open) additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
 
 ## Usage Examples
 
@@ -60,16 +87,9 @@ FROM users;
 ```
 
 <Note>
-  The `key`, `level`, and `mode` parameters are optional. When you omit them, the UDF
-  uses the defaults: no key, universal level, and sealed mode. Note that omitting the
-  key while using sealed mode (the default) will produce an error — you must either
-  supply a key or explicitly pass `2` as the mode to use plain encoding.
+  The `key`, `level`, and `mode` parameters are optional. When you omit them, the UDF uses the defaults: no key, universal level, and sealed mode. Note that omitting the key while using sealed mode (the default) will produce an error — you must either supply a key or explicitly pass `2` as the mode to use plain encoding.
 </Note>
 
 <Warning>
-  Avoid hardcoding encryption keys as string literals in SQL queries. Keys written
-  directly into queries appear in query logs, slow-query logs, `PROCESSLIST` output,
-  and replication binlogs. Instead, store the key in a MySQL user variable set by your
-  application at session open time, or inject it through a prepared statement parameter
-  so it never appears as a literal in any log.
+  Avoid hardcoding encryption keys as string literals in SQL queries. Keys written directly into queries appear in query logs, slow-query logs, `PROCESSLIST` output, and replication binlogs. Instead, store the key in a MySQL user variable set by your application at session open time, or inject it through a prepared statement parameter so it never appears as a literal in any log.
 </Warning>

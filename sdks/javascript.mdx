@@ -4,7 +4,18 @@ sidebarTitle: "JavaScript"
 description: "Install @humancognition/hce to encode binary identifiers into pronounceable strings from Node.js or the browser. Full WebAssembly API reference included."
 ---
 
-`@humancognition/hce` is a WebAssembly package compiled directly from the Rust core. It works in both Node.js and browser environments with no native build step — you install from npm and load the `.wasm` binary at runtime.
+`@humancognition/hce` is a WebAssembly package compiled directly from the canonical `hce-core` Rust crate. It works in both Node.js and browser environments with no native build step — you install from npm and load the `.wasm` binary at runtime. Output strings are byte-for-byte identical to every other HCE binding, so a UUID encoded in the browser can be decoded by a Python or Go service with the same key.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width columns and URL slugs.
+- **Encrypted.** In `"sealed"` and `"open"` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `"plain"` mode). A single character flip is rejected on decode before any bytes are returned.
+- **Self-correcting.** `recover()` walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit — the same property that makes phone numbers easy to read back.
 
 ## Installation
 
@@ -21,7 +32,7 @@ The WASM module must be initialized before you create any `HceCodec` instance. U
     ```js
     import { readFileSync } from "fs";
     import { initSync, HceCodec } from "@humancognition/hce";
-
+    
     const wasm = readFileSync("node_modules/@humancognition/hce/index_bg.wasm");
     initSync(wasm);
     ```
@@ -41,32 +52,53 @@ new HceCodec(key: string | null, level: string, mode: string)
 ```
 
 <ParamField path="key" type="string | null">
-  Hex-encoded encryption key string. Pass `null` for plain mode. Convert a raw byte key to hex with `Buffer.from(key).toString("hex")` in Node.js.
+  Hex-encoded encryption key string; a 32-byte (64 hex character) key is recommended. Pass `null` for `"plain"` mode. Convert a raw byte key to hex with `Buffer.from(key).toString("hex")` in Node.js or `[...key].map(b => b.toString(16).padStart(2, "0")).join("")` in the browser.
 </ParamField>
 
 <ParamField path="level" type="string">
-  Phoneme level: `"universal"` (broadest readability), `"eu"`, `"en"`, or `"numeric"`.
+  Phoneme level: `"universal"`, `"eu"`, `"en"`, or `"numeric"`. See [language levels](/concepts/language-levels) for the phoneme inventory of each level.
 </ParamField>
 
 <ParamField path="mode" type="string">
-  Codec mode: `"sealed"` (HMAC-SHA256 confidentiality + integrity), `"open"` (sortable timestamp prefix), or `"plain"` (CRC integrity, no encryption).
+  Codec mode. See the mode table below.
 </ParamField>
+
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `"sealed"` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `"open"` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging with a sortable timestamp prefix |
+| `"plain"` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`"sealed"` and `"open"` produce different output for the same input because the mode is mixed into the cipher tweak. `"open"` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `"universal"` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `"eu"` | Universal plus EU-language consonant clusters | European product surfaces |
+| `"en"` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `"numeric"` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
 
 ## Core Methods
 
 | Method | Returns | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `encode(data: Uint8Array)` | `string` | Encode bytes to an HCE string |
 | `decode(input: string)` | `Uint8Array` | Decode to original bytes |
 | `recover(input: string)` | `Uint8Array` | Attempt self-correction on corrupted input |
+
+`decode()` is strict by design: a single character flip throws rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `recover()` first to attempt automatic correction across the phoneme confusion graph.
 
 ## Configuration Methods
 
 Each method returns the `HceCodec` instance so you can chain them fluently.
 
 | Method | Description |
-|--------|-------------|
-| `withBitWidth(32 \| 64 \| 96 \| 128)` | Domain bit width; default `128` |
+| --- | --- |
+| \`withBitWidth(32 | 64 | 96 | 128)\` | Domain bit width; default `128` |
 | `withDomainModulus(n: string)` | Custom modulus as a decimal string |
 | `withCase(uppercase: boolean)` | `true` = uppercase output (default); `false` = lowercase |
 | `withCheckSyllables(n: number)` | HMAC check syllables 1–8; default `1` |
@@ -74,7 +106,7 @@ Each method returns the `HceCodec` instance so you can chain them fluently.
 | `withChunkNone()` | No separator — contiguous output string |
 | `withChunkFixed(charSize: number)` | Fixed syllable count per chunk |
 | `withChunkPattern(pattern: number[])` | Custom syllable-per-chunk pattern |
-| `withCipher("feistel" \| "shuffle", key?: string)` | Cipher selection; `"feistel"` is the default 8-round HMAC-SHA256 cipher |
+| \`withCipher("feistel" | "shuffle", key?: string)\` | Cipher selection; `"feistel"` is the default 8-round HMAC-SHA256 cipher |
 | `withTimestampConfig(epochMs: number, gran: string)` | Timestamp prefix (`"open"` mode only) |
 
 <Tip>
@@ -99,3 +131,22 @@ console.log(id); // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
 
 const decoded = hce.decode(id);
 ```
+
+## Self-Recovery Example
+
+If a user mistypes or mispronounces a single syllable (`l`↔`r`, `m`↔`n`, `b`↔`v`), `recover()` walks the phoneme confusion graph and returns the corrected bytes when there is exactly one valid candidate. If several candidates are valid, or none are, it throws.
+
+```js
+const hce = new HceCodec(key, "universal", "sealed");
+
+try {
+  // User typed "KLUMA-..." instead of "KRUMA-..."
+  const decoded = hce.recover("KLUMA-...");
+} catch (err) {
+  // Ambiguous or unrecoverable input — ask the user to re-enter
+}
+```
+
+## Browser vs. Node.js
+
+The same package handles both environments. In Node.js you load the `.wasm` file off disk and pass it to `initSync` synchronously. In the browser, the bundler resolves the asset URL and you call `await init()` once during application startup; after that, `HceCodec` is ready to use synchronously everywhere in your app.

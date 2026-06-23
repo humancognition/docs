@@ -4,7 +4,18 @@ sidebarTitle: "Java"
 description: "Use the HCE Java binding to encode and decode binary identifiers via JNA, with full Maven and Gradle support for any JVM-based project."
 ---
 
-The HCE Java binding uses JNA (Java Native Access) to call the Rust `hce-ffi` shared library directly from the JVM. It works with Maven, Gradle, and any JVM-based project — no JNI glue code required. You create an `HceCodec` instance, configure it with a builder-style fluent API, and call `encode` or `decode` on your binary identifiers.
+The HCE Java binding uses JNA (Java Native Access) to call the canonical `hce-core` Rust crate through the `hce-ffi` C ABI directly from the JVM. It works with Maven, Gradle, and any JVM-based project — no JNI glue code required. You create an `HceCodec` instance, configure it with a builder-style fluent API, and call `encode` or `decode` on your binary identifiers. Output strings are byte-for-byte identical to those produced by every other HCE binding.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width database columns.
+- **Encrypted.** In `SEALED` and `OPEN` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `PLAIN` mode). A single character flip is detected on decode and rejected before any bytes are returned.
+- **Self-correcting.** A `recover` call walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit.
 
 ## Prerequisites
 
@@ -59,25 +70,49 @@ import com.github.tmddn3070.hce.HceCodec;
 HceCodec h = new HceCodec(byte[] key, int level, int mode);
 ```
 
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `HceCodec.SEALED` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `HceCodec.OPEN` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging with a sortable timestamp prefix |
+| `HceCodec.PLAIN` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`SEALED` and `OPEN` produce different output for the same input because the mode is mixed into the cipher tweak. `OPEN` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `HceCodec.UNIVERSAL` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `HceCodec.EU` | Universal plus EU-language consonant clusters | European product surfaces |
+| `HceCodec.EN` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `HceCodec.NUMERIC` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
+
+See [language levels](/concepts/language-levels) for the full phoneme inventory of each level.
+
 ### Core methods
 
 | Method | Returns | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `encode(byte[] data)` | `String` | Encode bytes to an HCE string |
 | `decode(String input)` | `byte[]` | Decode an HCE string to original bytes |
+| `recover(String input)` | `byte[]` | Attempt phoneme confusion correction on a corrupted string |
+
+`decode` is strict by design: a single character flip throws rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `recover` first to attempt automatic correction across the phoneme confusion graph.
 
 ### Configuration methods
 
 Each method mutates the codec in place and returns `this`, so you can chain calls in a builder pattern.
 
 | Method | Description |
-|--------|-------------|
+| --- | --- |
 | `withBitWidth(int bits)` | Set the domain bit width |
 | `withModulus(long modulus)` | Set a custom modulus domain |
 | `withCipherFeistel(byte[] key)` | Use the Feistel cipher with an optional separate key |
 | `withCipherShuffle()` | Use the Shuffle cipher |
 | `withCase(int caseVal)` | `HceCodec.CASE_UPPER` or `CASE_LOWER` |
-| `withCheckSyllables(int n)` | Append *n* check syllables (1–8) |
+| `withCheckSyllables(int n)` | Append _n_ check syllables (1–8) |
 | `withSeparator(char sep)` | Set the chunk separator character |
 | `withChunkNone()` | Remove all separators |
 | `withChunkFixed(int charSize)` | Split output into fixed-width chunks |
@@ -104,8 +139,19 @@ try (HceCodec h = new HceCodec(key, HceCodec.UNIVERSAL, HceCodec.SEALED)) {
 }
 ```
 
+## Self-Recovery Example
+
+If a user mistypes or mispronounces a single syllable (`l`↔`r`, `m`↔`n`, `b`↔`v`), `recover` walks the phoneme confusion graph and returns the corrected bytes when there is exactly one valid candidate. If several candidates are valid, or none are, it throws an exception.
+
+```java
+try (HceCodec h = new HceCodec(key, HceCodec.UNIVERSAL, HceCodec.SEALED)) {
+    // User typed "KLUMA-..." instead of "KRUMA-..."
+    byte[] decoded = h.recover("KLUMA-...");
+} catch (Exception e) {
+    // Ambiguous or unrecoverable input — ask the user to re-enter
+}
+```
+
 <Warning>
-  `HceCodec` implements `AutoCloseable` and holds a native pointer to a Rust-allocated object. Always wrap it in a
-  try-with-resources block, or call `close()` explicitly when you are finished. Failing
-  to do so will leak native memory for the lifetime of the JVM process.
+  `HceCodec` implements `AutoCloseable` and holds a native pointer to a Rust-allocated object. Always wrap it in a try-with-resources block, or call `close()` explicitly when you are finished. Failing to do so will leak native memory for the lifetime of the JVM process.
 </Warning>

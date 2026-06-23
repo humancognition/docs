@@ -4,7 +4,18 @@ sidebarTitle: "Elixir"
 description: "Use the HCE Elixir binding — a Rustler NIF — to encode and decode identifiers in Elixir and Phoenix with a simple Mix dependency and functional API."
 ---
 
-The HCE Elixir binding is a Rustler NIF (Native Implemented Function) that calls directly into the compiled Rust library. You add it as a Mix dependency, compile the native extension once, and use the `Hce` module like any other Elixir module. The API follows Elixir conventions — `new/3` returns `{:ok, codec}`, `decode/2` returns `{:ok, binary} | {:error, term}`, and configuration functions accept and return the codec struct for easy piping.
+The HCE Elixir binding is a Rustler NIF (Native Implemented Function) that calls directly into the canonical `hce-core` Rust crate. You add it as a Mix dependency, compile the native extension once, and use the `Hce` module like any other Elixir module. The API follows Elixir conventions — `new/3` returns `{:ok, codec}`, `decode/2` returns `{:ok, binary} | {:error, term}`, and configuration functions accept and return the codec struct for easy piping. Output strings are byte-for-byte identical to those produced by every other HCE binding.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width Ecto columns.
+- **Encrypted.** In `:sealed` and `:open` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `:plain` mode). A single character flip returns `{:error, reason}` on decode before any bytes are returned.
+- **Self-correcting.** `recover/2` walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit.
 
 ## Prerequisites
 
@@ -32,7 +43,28 @@ end
 Hce.new(key, level \\ :universal, mode \\ :sealed)
 ```
 
-`key` is a binary string. `level` is one of `:universal`, `:eu`, `:en`, or `:numeric`. `mode` is one of `:sealed`, `:open`, or `:plain`. Returns `{:ok, %Hce{}}` on success or `{:error, reason}` if the key is missing for an encrypted mode.
+`key` is a binary string (32 bytes recommended). `level` is one of `:universal`, `:eu`, `:en`, or `:numeric`. `mode` is one of `:sealed`, `:open`, or `:plain`. Returns `{:ok, %Hce{}}` on success or `{:error, reason}` if the key is missing for an encrypted mode.
+
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `:sealed` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `:open` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging with a sortable timestamp prefix |
+| `:plain` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`:sealed` and `:open` produce different output for the same input because the mode is mixed into the cipher tweak. `:open` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `:universal` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `:eu` | Universal plus EU-language consonant clusters | European product surfaces |
+| `:en` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `:numeric` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
+
+See [language levels](/concepts/language-levels) for the full phoneme inventory of each level.
 
 ### Encoding and decoding
 
@@ -41,6 +73,8 @@ Hce.encode(codec, data :: binary) :: String.t()
 Hce.decode(codec, input :: String.t()) :: {:ok, binary} | {:error, term}
 Hce.recover(codec, input :: String.t()) :: {:ok, binary} | {:error, term}
 ```
+
+`decode/2` is strict by design: a single character flip returns `{:error, :integrity_failure}` rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `recover/2` first to attempt automatic correction across the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …). `recover/2` returns `{:ok, binary}` when exactly one candidate is valid, or `{:error, reason}` if the input is ambiguous or unrecoverable.
 
 ### Configuration functions
 
@@ -88,15 +122,11 @@ Hce.destroy(h)
 ```
 
 <Warning>
-  You must call `Hce.destroy/1` to release the native resource when you are finished
-  with a codec. The BEAM garbage collector does not manage Rust-allocated memory, so
-  codecs that are never destroyed will leak for the lifetime of the VM node.
+  You must call `Hce.destroy/1` to release the native resource when you are finished with a codec. The BEAM garbage collector does not manage Rust-allocated memory, so codecs that are never destroyed will leak for the lifetime of the VM node.
 </Warning>
 
 <Tip>
-  In a Phoenix controller, pattern-match on `Hce.decode/2` directly in the function
-  head or with a `with` chain to return structured error responses without nested
-  `case` blocks:
+  In a Phoenix controller, pattern-match on `Hce.decode/2` directly in the function head or with a `with` chain to return structured error responses without nested `case` blocks:
 
   ```elixir
   with {:ok, codec} <- Hce.new(key, :universal, :sealed),

@@ -4,7 +4,18 @@ sidebarTitle: "Go"
 description: "Use the HCE Go binding via cgo to encode binary identifiers into pronounceable strings. Wraps the Rust hce-ffi C ABI with full API reference and examples."
 ---
 
-The HCE Go binding wraps the Rust `hce-ffi` C ABI via cgo. You must build the native Rust library first, then import the Go package — all encoding and decoding is delegated to the compiled Rust core, giving you the same performance and correctness as the native crate.
+The HCE Go binding wraps the canonical `hce-core` Rust crate through the `hce-ffi` C ABI via cgo. You build the native Rust library once, import the Go package, and call `Codec` methods directly — every byte of encoding and decoding is delegated to the compiled Rust core, so output strings are byte-for-byte identical to those produced by every other HCE binding.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width columns.
+- **Encrypted.** In `Sealed` and `Open` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `Plain` mode). A single character flip returns a non-nil error on decode before any bytes are returned.
+- **Self-correcting.** A `Recover` call walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit.
 
 ## Prerequisites
 
@@ -30,30 +41,52 @@ defer c.Close()
 ```
 
 <ParamField path="key" type="[]byte">
-  Encryption key bytes. Pass a 32-byte slice for `hce.Sealed` or `hce.Open` mode. Pass `nil` for `hce.Plain`.
+  Encryption key bytes; 32 bytes recommended. Pass a 32-byte slice for `hce.Sealed` or `hce.Open` mode. Pass `nil` for `hce.Plain`. The key is used for both the Feistel cipher and the HMAC-SHA256 check syllables.
 </ParamField>
 
 <ParamField path="level" type="hce.Level">
-  Phoneme level constant: `hce.Universal`, `hce.Eu`, `hce.En`, or `hce.Numeric`.
+  Phoneme level constant: `hce.Universal`, `hce.Eu`, `hce.En`, or `hce.Numeric`. See [language levels](/concepts/language-levels) for the phoneme inventory of each level.
 </ParamField>
 
 <ParamField path="mode" type="hce.Mode">
-  Codec mode constant: `hce.Sealed` (HMAC-SHA256 confidentiality + integrity), `hce.Open` (sortable timestamp prefix), or `hce.Plain` (CRC integrity, no encryption).
+  Codec mode constant. See the mode table below.
 </ParamField>
+
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `hce.Sealed` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `hce.Open` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging with a sortable timestamp prefix |
+| `hce.Plain` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`hce.Sealed` and `hce.Open` produce different output for the same input because the mode is mixed into the cipher tweak. `hce.Open` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `hce.Universal` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `hce.Eu` | Universal plus EU-language consonant clusters | European product surfaces |
+| `hce.En` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `hce.Numeric` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
 
 ## Core Methods
 
 | Method | Returns | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `Encode(data []byte)` | `(string, error)` | Encode bytes to an HCE string |
 | `Decode(input string)` | `([]byte, error)` | Decode to original bytes |
+| `Recover(input string)` | `([]byte, error)` | Attempt phoneme confusion correction on a corrupted string |
+
+`Decode` is strict by design: a single character flip returns a non-nil error rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `Recover` first to attempt automatic correction across the phoneme confusion graph.
 
 ## Configuration Methods
 
 Call these methods on your `*Codec` before calling `Encode` or `Decode`.
 
 | Method | Description |
-|--------|-------------|
+| --- | --- |
 | `WithBitWidth(bits uint32)` | Domain bit width (16–128) |
 | `WithCase(cas hce.Case)` | Output case |
 | `WithCheckSyllables(n int)` | HMAC check syllables (1–8) |
@@ -94,6 +127,21 @@ func main() {
         panic(err)
     }
     fmt.Printf("%x\n", decoded)
+}
+```
+
+## Self-Recovery Example
+
+If a user mistypes or mispronounces a single syllable (`l`↔`r`, `m`↔`n`, `b`↔`v`), `Recover` walks the phoneme confusion graph and returns the corrected bytes when there is exactly one valid candidate. If several candidates are valid, or none are, it returns an error.
+
+```go
+c, _ := hce.New(key, hce.Universal, hce.Sealed)
+defer c.Close()
+
+// User typed "KLUMA-..." instead of "KRUMA-..."
+decoded, err := c.Recover("KLUMA-...")
+if err != nil {
+    // Ambiguous or unrecoverable input — ask the user to re-enter
 }
 ```
 

@@ -4,7 +4,18 @@ sidebarTitle: "Swift"
 description: "Integrate the HCE Swift package via Swift Package Manager using C interop to encode and decode identifiers with a clean, chainable Swift API."
 ---
 
-The HCE Swift package wraps the Rust `hce-ffi` C ABI through Swift's native C interop layer. You add it as a local Swift Package Manager dependency, link against `libhce_ffi`, and call `HceCodec` directly from Swift code — no bridging headers or Objective-C wrappers required. The API is fully type-safe, uses Swift enums for level and mode, and returns optionals so you can handle errors with standard `guard` and `if let` patterns.
+The HCE Swift package wraps the canonical `hce-core` Rust crate through the `hce-ffi` C ABI via Swift's native C interop layer. You add it as a local Swift Package Manager dependency, link against `libhce_ffi`, and call `HceCodec` directly from Swift code — no bridging headers or Objective-C wrappers required. The API is fully type-safe, uses Swift enums for level and mode, and returns optionals so you can handle errors with standard `guard` and `if let` patterns. Output strings are byte-for-byte identical to those produced by every other HCE binding.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width columns and `String` properties.
+- **Encrypted.** In `.sealed` and `.open` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `.plain` mode). A single character flip is detected on decode and returns `nil` before any bytes are returned.
+- **Self-correcting.** A `recover` call walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit.
 
 ## Prerequisites
 
@@ -53,26 +64,49 @@ import Hce
 guard let h = HceCodec(key: Data?, level: Level, mode: Mode) else { return }
 ```
 
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `.sealed` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `.open` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging with a sortable timestamp prefix |
+| `.plain` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`.sealed` and `.open` produce different output for the same input because the mode is mixed into the cipher tweak. `.open` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `.universal` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `.eu` | Universal plus EU-language consonant clusters | European product surfaces |
+| `.en` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `.numeric` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
+
+See [language levels](/concepts/language-levels) for the full phoneme inventory of each level.
+
 ### Core methods
 
 | Method | Returns | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `encode(Data)` | `String?` | Encode bytes to an HCE string |
 | `decode(String)` | `Data?` | Decode an HCE string to original bytes |
 | `recover(String)` | `Data?` | Attempt to decode with automatic error correction |
+
+`decode(_:)` is strict by design: a single character flip returns `nil` rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `recover(_:)` first to attempt automatic correction across the phoneme confusion graph.
 
 ### Configuration methods
 
 Each method returns `Self`, so you can chain the calls in a single expression.
 
 | Method | Description |
-|--------|-------------|
+| --- | --- |
 | `withBitWidth(UInt32)` | Set the domain bit width |
 | `withModulus(UInt64)` | Set a custom domain modulus |
 | `withCipherFeistel(Data?)` | Use the Feistel cipher with an optional separate key |
 | `withCipherShuffle()` | Use the Shuffle cipher |
 | `withCase(CipherCase)` | `.upper` or `.lower` output casing |
-| `withCheckSyllables(Int)` | Append *n* check syllables (1–8) |
+| `withCheckSyllables(Int)` | Append _n_ check syllables (1–8) |
 | `withSeparator(Character)` | Set the chunk separator character |
 | `withChunkNone()` | Remove all separators |
 | `withChunkFixed(Int)` | Split output into fixed-width chunks |
@@ -99,5 +133,20 @@ if let encoded = h.encode(uuid) {
         print(decoded.map { String(format: "%02x", $0) }.joined())
         // => 0195e3a07c2e7b418f3d9a6c1e0b4d27
     }
+}
+```
+
+## Self-Recovery Example
+
+If a user mistypes or mispronounces a single syllable (`l`↔`r`, `m`↔`n`, `b`↔`v`), `recover(_:)` walks the phoneme confusion graph and returns the corrected bytes when there is exactly one valid candidate. If several candidates are valid, or none are, it returns `nil`.
+
+```swift
+guard let h = HceCodec(key: key, level: .universal, mode: .sealed) else { return }
+
+// User typed "KLUMA-..." instead of "KRUMA-..."
+if let decoded = h.recover("KLUMA-...") {
+    use(decoded)
+} else {
+    // Ambiguous or unrecoverable input — ask the user to re-enter
 }
 ```

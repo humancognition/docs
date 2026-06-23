@@ -4,11 +4,22 @@ sidebarTitle: "Python"
 description: "Install the HCE Python package via pip and encode binary identifiers into pronounceable strings. Native PyO3 extension with full builder API reference."
 ---
 
-The HCE Python package (`hce`) is a native extension built with PyO3. It exposes a near-identical API to the Rust core as a Python class, so you get the full performance of the compiled Rust codec with idiomatic Python syntax — no native build step required on your end.
+The HCE Python package (`hce`) is a native extension built with PyO3. It wraps the canonical `hce-core` Rust crate, so you get the full performance and correctness of the compiled codec with idiomatic Python syntax — no native build step is required on your end, and the resulting strings are byte-for-byte identical to those produced by every other HCE binding.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors — while preserving the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width columns.
+- **Encrypted.** In `"sealed"` and `"open"` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `"plain"` mode). A single character flip is rejected with `ValueError` before any bytes are returned.
+- **Self-correcting.** `recover()` walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit.
 
 ## Installation
 
-Install `hce` from PyPI with a single command. Pre-compiled wheels are available for Linux, macOS, and Windows on Python 3.8+.
+Install `hce` from PyPI with a single command. Pre-compiled wheels are available for Linux, macOS, and Windows on Python 3.8\+.
 
 ```bash
 pip install hce
@@ -29,39 +40,60 @@ h = hce.Hce(
 ```
 
 <ParamField path="key" type="bytes | None">
-  Encryption key bytes. Pass `None` only when `mode` is `"plain"` — all other modes require a key.
+  Encryption key bytes; 32 bytes recommended. Pass `None` only when `mode` is `"plain"` — all other modes require a key. The key is used for both the Feistel cipher and the HMAC-SHA256 check syllables.
 </ParamField>
 
 <ParamField path="level" type="str">
-  Phoneme level: `"universal"` (default, broadest cross-language readability), `"eu"`, `"en"`, or `"numeric"`.
+  Phoneme level: `"universal"` (default), `"eu"`, `"en"`, or `"numeric"`. See [language levels](/concepts/language-levels) for the phoneme inventory of each level.
 </ParamField>
 
 <ParamField path="mode" type="str">
-  Codec mode: `"sealed"` (HMAC-SHA256 confidentiality + integrity), `"open"` (sortable timestamp prefix), or `"plain"` (CRC integrity, no encryption).
+  Codec mode. See the mode table below.
 </ParamField>
 
 <ParamField path="bit_width" type="int">
   Cipher domain bit width from 16 to 128. Defaults to `128`.
 </ParamField>
 
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `"sealed"` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `"open"` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging with a sortable timestamp prefix |
+| `"plain"` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`"sealed"` and `"open"` produce different output for the same input because the mode is mixed into the cipher tweak. `"open"` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `"universal"` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences |
+| `"eu"` | Universal plus EU-language consonant clusters | European product surfaces |
+| `"en"` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `"numeric"` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
+
 ## Core Methods
 
 | Method | Returns | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `encode(data: bytes)` | `str` | Encode bytes to an HCE string |
 | `decode(input: str)` | `bytes` | Decode to original bytes; raises `ValueError` on integrity failure |
 | `recover(input: str)` | `bytes` | Attempt self-correction; raises `ValueError` if unrecoverable |
+
+`decode()` is strict: a single character flip raises `ValueError` rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `recover()` first to attempt automatic correction across the phoneme confusion graph.
 
 ## Configuration Methods
 
 Each method returns the `Hce` instance, so you can chain them in a builder pattern.
 
 | Method | Description |
-|--------|-------------|
+| --- | --- |
 | `with_bit_width(bits: int)` | Domain bit width (16–128) |
 | `with_modulus(n: int)` | Custom modulus domain (must be ≥ 2) |
-| `with_cipher(kind: str, key: bytes \| None)` | `"feistel"` (8-round HMAC-SHA256) or `"shuffle"` (4-round lightweight) |
-| `with_case("upper" \| "lower")` | Output case; default `"upper"` |
+| \`with\_cipher(kind: str, key: bytes | None)\` | `"feistel"` (8-round HMAC-SHA256) or `"shuffle"` (4-round lightweight) |
+| \`with\_case("upper" | "lower")\` | Output case; default `"upper"` |
 | `with_check_syllables(n: int)` | HMAC check syllables 1–8; default `1` |
 | `with_separator(sep: str)` | Separator character between chunks; default `"-"` |
 | `with_chunk_none()` | No separator — contiguous output string |
@@ -93,3 +125,25 @@ decoded = h.decode(encoded)
 assert decoded == uuid_bytes
 print(encoded)
 ```
+
+## Self-Recovery Example
+
+If a user mistypes or mispronounces a single syllable (`l`↔`r`, `m`↔`n`, `b`↔`v`), `recover()` walks the phoneme confusion graph and returns the corrected bytes when there is exactly one valid candidate. If several candidates are valid, or none are, it raises `ValueError`.
+
+```python
+import hce
+
+h = hce.Hce(key=b"32-byte-secret-key-here-xxxxxx!!",
+            level="universal", mode="sealed")
+
+try:
+    # User typed "KLUMA-..." instead of "KRUMA-..."
+    decoded = h.recover("KLUMA-...")
+except ValueError as e:
+    # Ambiguous or unrecoverable input — ask the user to re-enter
+    ...
+```
+
+## Thread Safety
+
+The `Hce` instance is safe to share across threads — there is no internal mutable state once construction is complete. The PyO3 wrapper holds the GIL only briefly to marshal arguments in and out of the Rust core, so encoding under threads scales close to the underlying Rust performance.

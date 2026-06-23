@@ -4,7 +4,20 @@ sidebarTitle: "Rust"
 description: "Use hce-core, the canonical Rust crate, to encode and decrypt binary identifiers into pronounceable strings. Full API reference with builder configuration."
 ---
 
-`hce-core` is the canonical Rust crate that all other language bindings wrap. You add it to your `Cargo.toml`, construct an `Hce` struct with a key and language level, and call `encode`/`decode` directly — no runtime or daemon required.
+`hce-core` is the canonical Rust crate. Every other language binding — Python, JavaScript, Go, Java, Swift, Elixir, and the MySQL UDF — wraps this crate through `hce-ffi`, so the behaviour you observe here is the behaviour you get in every other language. Add it to your `Cargo.toml`, construct an `Hce` struct with a key and a language level, and call `encode`/`decode` directly. There is no runtime, no daemon, and no I/O — the codec is a pure function from bytes to a pronounceable string and back.
+
+## Why HCE
+
+HCE turns a 128-bit identifier into a string a human can read aloud over the phone, recognise in a log line, and type back into a form without errors. It does this without sacrificing the properties you already expect from a UUID:
+
+- **Lossless.** Every byte you put in comes out unchanged. The mapping from the input domain to the output string is bijective.
+- **Format-preserving.** The output is exactly the same length for every input of the same bit width, so HCE strings fit in fixed-width columns.
+- **Encrypted.** In `Sealed` and `Open` modes, a Feistel format-preserving cipher keyed by your secret randomises the bit pattern, so adjacent UUIDs do not produce adjacent HCE strings and the generation time is not leaked.
+- **Integrity-checked.** Every string ends with one or more check syllables derived from HMAC-SHA256 (or CRC in `Plain` mode). A single character flip is detected on decode and rejected before any bytes are returned.
+- **Self-correcting.** `recover` walks the phoneme confusion graph (`m`↔`n`, `b`↔`v`, `l`↔`r`, …) to fix a single mispronounced or mistyped syllable without an extra round trip.
+- **Chunked for working memory.** The string is split into 4–5 chunks of roughly equal length so it lands inside Cowan's 4±1 working-memory limit — the same property that makes phone numbers easy to read back.
+
+You do not have to opt in to any of these properties; they are the default behaviour of `Hce::new(...).encode(...)`.
 
 ## Installation
 
@@ -17,7 +30,9 @@ hce-fpe = "0.1"       # for cipher selection
 hce-adapters = "0.1"  # for UUID/ULID/etc.
 ```
 
-## Constructor and Core API
+`hce-core` has no required runtime dependencies beyond the Rust standard library. `hce-fpe` pulls in `hmac` and `sha2` for the default Feistel cipher. `hce-adapters` is feature-gated per identifier family, so you only pay for the adapters you import.
+
+## Constructor
 
 Construct an `Hce` codec with `Hce::new`, then chain builder methods to configure output format before encoding.
 
@@ -26,32 +41,53 @@ let hce = Hce::new(key: Option<&[u8]>, level: LanguageLevel, mode: HceMode);
 ```
 
 <ParamField path="key" type="Option<&[u8]>">
-  Encryption key; 32 bytes recommended. Pass `None` when using `HceMode::Plain` — any other mode requires a key.
+  Encryption key; 32 bytes recommended. Pass `None` when using `HceMode::Plain` — any other mode requires a key. The key is used both for the Feistel cipher and for the HMAC-SHA256 check syllables.
 </ParamField>
 
 <ParamField path="level" type="LanguageLevel">
-  Phoneme set used for encoding. Choose `Universal` for broadest cross-language readability, or `Eu`, `En`, or `Numeric` for region-specific or digit-style output.
+  Phoneme set used for encoding. Choose `Universal` for the broadest cross-language readability, or `Eu`, `En`, or `Numeric` for region-specific or digit-style output. See [language levels](/concepts/language-levels) for the full phoneme inventory of each level.
 </ParamField>
 
 <ParamField path="mode" type="HceMode">
-  Encryption and integrity strategy. `Sealed` gives full confidentiality with HMAC integrity; `Open` adds a sortable timestamp prefix; `Plain` applies CRC-only integrity with no encryption.
+  Encryption and integrity strategy. See the mode table below.
 </ParamField>
+
+### Modes
+
+| Mode | Cipher | Integrity | Key required | Use case |
+| --- | --- | --- | --- | --- |
+| `Sealed` | Feistel FPE | HMAC-SHA256 | Yes | Public URLs, API responses, anything user-facing |
+| `Open` | Feistel FPE | HMAC-SHA256 | Yes | Internal logs and debugging where a sortable timestamp prefix is useful |
+| `Plain` | Fixed shuffle (no key) | CRC | No | base64-style use without secrets; no confidentiality |
+
+`Sealed` and `Open` produce different output for the same input because the mode is mixed into the cipher tweak. `Open` additionally prepends a short audible syllable derived from the embedded UUIDv7 timestamp, so a human reading the log can tell the rough generation date at a glance.
+
+### Language levels
+
+| Level | Phoneme inventory | Best for |
+| --- | --- | --- |
+| `Universal` | Phonemes present in ≥85% of PHOIBLE's 3,000\+ languages | Global audiences, cross-language support |
+| `Eu` | Universal plus EU-language consonant clusters | European product surfaces |
+| `En` | Adds English-specific clusters (e.g. `st`, `sp`, `sk`) | English-only audiences |
+| `Numeric` | Digit substitution for the consonant pool | Voice IVR, numeric keypads |
 
 ### Core Methods
 
 | Method | Returns | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `encode(&[u8])` | `String` | Encrypt and encode bytes to an HCE string |
 | `decode(&str)` | `Result<Vec<u8>, HceError>` | Decode and decrypt; returns `Err` on integrity failure |
-| `recover(&str)` | `Result<RecoveryResult, HceError>` | Attempt phoneme confusion correction |
+| `recover(&str)` | `Result<RecoveryResult, HceError>` | Attempt phoneme confusion correction on a corrupted string |
 | `decode_corrected(&RecoveryResult)` | `Option<Vec<u8>>` | Decode a corrected result returned by `recover` |
+
+`decode` is strict by design: a single character flip is rejected with `HceError::IntegrityFailure` rather than silently returning the wrong bytes. If you expect human input — handwriting, telephony, voice transcription — call `recover` first to attempt automatic correction across the phoneme confusion graph, then `decode_corrected` to extract the bytes if a unique candidate was found.
 
 ### Configuration Methods
 
 Chain these builder methods on your `Hce` instance before calling `encode`. Each method returns `Self` so you can compose them in a single expression.
 
 | Method | Description |
-|--------|-------------|
+| --- | --- |
 | `with_bit_width(u32)` | Set cipher domain size (16–128 bits; default 128) |
 | `with_modulus(u128)` | Use a custom modulus domain instead of bit width |
 | `with_case(HceCase)` | `HceCase::Upper` or `HceCase::Lower` (default `Upper`) |
@@ -61,7 +97,7 @@ Chain these builder methods on your `Hce` instance before calling `encode`. Each
 | `with_cipher(Arc<dyn Fpe>)` | Inject a custom format-preserving cipher |
 
 <Note>
-  Chunking is controlled through `ChunkSpec`. Use `ChunkSpec::natural()` (default, 5 chunks with `-` separator), `ChunkSpec::none()` (no separator), `ChunkSpec::fixed(n)` (fixed syllable count per chunk), or `ChunkSpec::pattern(&[3, 3, 4, 4])` (custom repeating pattern). Pass the result to `with_chunk_spec(...)`.
+  Chunking is controlled through `ChunkSpec`. Use `ChunkSpec::natural()` (default — five body chunks plus the check chunk, separated by `-`), `ChunkSpec::none()` (no separator), `ChunkSpec::fixed(n)` (fixed syllable count per chunk), or `ChunkSpec::pattern(&[3, 3, 4, 4])` (custom repeating pattern). Pass the result to `with_chunk_spec(...)`. Chunking is purely cosmetic — separators are stripped before decoding, so a user can paste the string with or without them.
 </Note>
 
 ## Error Reference
@@ -69,8 +105,8 @@ Chain these builder methods on your `Hce` instance before calling `encode`. Each
 `HceError` is returned by `decode` and `recover` when the input cannot be processed.
 
 | Error | Meaning |
-|-------|---------| 
-| `NormalizeError` | Input string could not be parsed or normalized |
+| --- | --- |
+| `NormalizeError` | Input string could not be parsed or normalised into syllables |
 | `KeyRequired` | `Sealed` or `Open` mode used without a key |
 | `RecoveryNotSupported` | `recover` called on a `Plain`-mode codec |
 | `IntegrityFailure` | Check-syllable HMAC or CRC verification failed |
@@ -97,3 +133,25 @@ fn main() {
     assert_eq!(decoded.as_slice(), &uuid_bytes);
 }
 ```
+
+## Self-Recovery Example
+
+`recover` returns a `RecoveryResult` describing whether the input was already valid, automatically corrected, or ambiguous between several candidates.
+
+```rust
+use hce_core::{Hce, HceMode, LanguageLevel, RecoveryResult};
+
+let hce = Hce::new(Some(key), LanguageLevel::Universal, HceMode::Sealed);
+
+// User typed "KLUMA" instead of "KRUMA" — l↔r confusion
+match hce.recover("KLUMA-...") {
+    Ok(RecoveryResult::Exact(bytes))            => use_bytes(bytes),
+    Ok(RecoveryResult::Corrected { bytes, .. }) => use_bytes(bytes),
+    Ok(RecoveryResult::Ambiguous(candidates))   => ask_user(candidates),
+    Err(_)                                       => reject(),
+}
+```
+
+## Thread Safety
+
+`Hce` is `Send + Sync` once constructed. You can share a single codec across threads via `Arc<Hce>` — there is no internal mutable state, and  the configured cipher key is stored immutably. Construction itself is cheap (no I/O, no allocations beyond the cipher state), so it is also reasonable to build a fresh codec per request if you prefer.
