@@ -4,7 +4,13 @@ sidebarTitle: "Self-Recovery"
 description: "HCE's self-recovery system corrects common phoneme confusions like m/n, al/an, and bl/br that occur when identifiers are spoken aloud or hand-transcribed."
 ---
 
-When an identifier is read aloud over a phone call, hand-written on paper, or typed from memory, small errors are inevitable. A speaker might say "bren" but a listener hears "blen". Someone copying from a screen might write "droflin" instead of "drofrin". HCE's self-recovery system addresses this directly: given a string that fails its integrity check, `hce.recover()` searches the confusion matrix — a catalogue of phoneme pairs that are commonly mistaken for one another — and attempts to find a single-token correction that restores a valid check. If exactly one correction works, the identifier is returned corrected. If several corrections are plausible, the result is marked ambiguous. If none work, the string is rejected.
+When an identifier is read aloud over a phone call, hand-written on paper, or typed from memory, small errors are inevitable. A speaker might say "bren" but a listener hears "blen". Someone copying from a screen might write "droflin" instead of "drofrin". HCE's self-recovery system addresses this directly: given a string that fails its integrity check, `hce.recover()` searches the **phoneme confusion matrix** — a catalogue of phoneme pairs that are commonly mistaken for one another — and attempts to find a single-token correction that restores a valid HMAC check. If exactly one correction works, the identifier is returned corrected. If several corrections are plausible, the result is marked ambiguous. If none work, the string is rejected.
+
+## Why a Confusion Matrix at All
+
+Human mishearing and mistyping is not random noise. People do not confuse `m` with `tr` — they confuse `m` with `n`, because both are nasals produced at neighbouring positions in the mouth. They do not confuse `b` with `s` — they confuse `b` with `p`, because both are bilabial stops differing only in voicing. These pairings are not opinion; they are measured by phoneticians and published as confusion matrices ([Meyer 2007](https://www.isca-archive.org/interspeech_2007/meyer07_interspeech.html), for example).
+
+HCE turns this insight on its head. Rather than treating confusion as a problem to suppress, it uses the matrix as a **search constraint** for recovery. When the integrity check fails, the recoverer does not have to try every possible substitution — only the small, structured set of edits a real human listener or typist might actually have made. This is the principle that makes single-token recovery both fast (search space ≈ a few dozen neighbours per token) and trustworthy (the surviving candidate is the one a person was most likely to have intended).
 
 ## Why a Confusion Matrix, Not a Generic Edit Distance
 
@@ -50,15 +56,16 @@ When you call `hce.recover()`, it returns a `Result<RecoveryResult, HceError>`. 
 
 ## Common Correctable Confusions
 
-The universal confusion matrix covers the phoneme pairs most commonly confused in verbal and handwritten communication:
+The universal confusion matrix covers the phoneme pairs most commonly confused in verbal and handwritten communication. Each entry is grounded in articulatory phonetics — the pair is confusable because the two sounds are produced with the same place of articulation, the same manner, or differ on a single feature.
 
 **Consonant onset confusions:**
 
-- `m` ↔ `n` — nasals that sound nearly identical in many accents
-- `b` ↔ `p` — voiced/unvoiced bilabial stops
-- `d` ↔ `t` — voiced/unvoiced alveolar stops
-- `g` ↔ `k` — voiced/unvoiced velar stops
-- `l` ↔ `r` — lateral vs. rhotic, frequently confused cross-linguistically
+- `m` ↔ `n` — both nasals; differ only by place (bilabial vs. alveolar)
+- `b` ↔ `p` — both bilabial stops; differ only by voicing
+- `d` ↔ `t` — both alveolar stops; differ only by voicing
+- `g` ↔ `k` — both velar stops; differ only by voicing
+- `b` ↔ `v` and `v` ↔ `f` — bilabial stop / labiodental fricative pairs that mix during fast speech
+- `l` ↔ `r` — both liquids; the single pair most often swapped across languages (notably in East Asian L1 transfer)
 
 **Consonant cluster confusions (l/r swap):**
 

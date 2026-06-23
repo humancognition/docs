@@ -21,6 +21,16 @@ HCE solves this by aligning the identifier's representation with how people actu
 
 You encode your identifier once, store or transmit the result, and decode it back whenever you need the original bytes — with cryptographic assurance that nobody tampered with it in transit.
 
+## Three Concrete Failure Modes HCE Eliminates
+
+The cost of raw identifiers is not abstract. It shows up in three operational failure modes that compound at scale:
+
+**Verbal transmission errors.** When an identifier is read aloud over a phone call, a radio, or a video meeting, hex strings break down between speaker and listener. `B` and `D`, `0` and `O`, `1` and `l` are confusable both visually and acoustically. By the time a support agent and a customer have agreed on a 32-character UUID, several characters have usually been re-read multiple times. HCE's phoneme alphabet was chosen specifically to remove these collision classes — every onset and nucleus is acoustically distinct in the universal phoneme inventory drawn from PHOIBLE.
+
+**Log-scanning cognitive load.** When an engineer scans a log file, a hex identifier carries no immediate context: nothing about when the record was created, which tenant it belongs to, or whether it is even a valid ID until you parse it. HCE strings in Open mode begin with an audible timestamp prefix that conveys epoch position at a glance, and every HCE string passes a structural sanity check (valid syllable shape, correct length, passing HMAC) before it is considered well-formed.
+
+**Manual entry mistakes.** When someone transcribes an identifier from a printed receipt, a screenshot, or dictation into a form, a one-character slip points to an entirely different record — and the mistake is rarely detected at input time. HCE catches single-syllable corruptions at the integrity-check stage, and where the corruption matches a known phoneme confusion (`m`↔`n`, `bl`↔`br`, `l`↔`r`), `hce.recover()` repairs the string automatically without a second round-trip to the user.
+
 ## A Display Layer, Not a Storage Format
 
 HCE is deliberately a **display layer**, not a replacement primary key. Your database still stores the canonical 16-byte UUID (or 8-byte Snowflake, 12-byte ObjectId, etc.) as a binary column, preserving index locality, join performance, and every existing tool that already understands UUID columns. HCE strings are produced only when bytes cross into a human channel — a UI, a log line, a phone call, a support ticket — and decoded back to bytes at the API boundary. This separation means adopting HCE never requires a schema migration, and switching keys or language levels never touches stored data.

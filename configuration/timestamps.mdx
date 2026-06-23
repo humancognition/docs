@@ -4,7 +4,18 @@ sidebarTitle: "Timestamps"
 description: "Use HCE's Open mode with timestamp configuration to produce lexicographically sortable encoded identifiers, ideal for distributed ID generation."
 ---
 
-HCE's Open mode can prefix every encoded identifier with a timestamp derived from a configurable reference epoch, making the resulting strings lexicographically sortable by creation time. This is particularly useful in distributed systems where you need globally unique, human-readable IDs that also carry ordering guarantees — without a centralised sequence generator. The timestamp occupies the leading syllables of the output, so a simple string sort is equivalent to a chronological sort.
+HCE's Open mode can prefix every encoded identifier with a short timestamp prefix derived from a configurable reference epoch. The prefix serves two purposes at once: it makes the encoded strings lexicographically sortable by creation time, and it makes the rough creation time **audible to a human reader** without any decoding step. This is particularly useful in distributed systems where you need globally unique, pronounceable IDs that also carry ordering and time-bucket signals — without a centralised sequence generator.
+
+## The Audible Timestamp Principle
+
+Conventional time-ordered identifiers like UUIDv7 and ULID embed a timestamp at the bit level. That is fine for machines, but it is invisible to a developer scanning a log line: two adjacent UUIDv7 strings differ in characters that carry no meaning to the eye. HCE inverts this. The timestamp is encoded as two real syllables at the start of the string — for example, `KA-RE` for one time bucket, `KI-RU` for a later one — so a person reading a log can immediately tell that one identifier is older than another without decoding anything.
+
+The mapping is **monotone in time**: the syllable indices increase deterministically with the unit count since the epoch, so two properties hold at once:
+
+- **Auditory ordering.** Reading the prefix aloud, a listener can tell which identifier is newer because the vowel sequence advances predictably.
+- **Lexicographic ordering.** A plain string sort produces the same order as a chronological sort, so you can sort encoded identifiers without ever decrypting them.
+
+The body of the identifier is still fully FPE-encrypted, just like in Sealed mode — the prefix is the _only_ thing that reveals creation time. Nothing else about the underlying bytes leaks.
 
 ## How timestamp prefixing works
 
@@ -18,7 +29,7 @@ The prefix is always two syllables in the form `K<V>-R<V>` (e.g. `KA-RE`), where
 ## Granularity options
 
 | Granularity | Typical Use |
-|---|---|
+| --- | --- |
 | `Second` | High-throughput IDs — e.g. event streams, IoT telemetry |
 | `Minute` | Most web and API applications |
 | `Hour` | Low-frequency IDs — e.g. batch jobs, scheduled tasks |
@@ -48,7 +59,7 @@ let bytes = hce.decode(&id).unwrap();
 The `epoch_ms` value `1_700_000_000_000` corresponds to 2023-11-14 22:13:20 UTC — a common choice for applications launched around that period that want small initial offset values.
 
 <Note>
-Timestamp prefixing only works in `Open` mode. `Sealed` mode does not prepend a timestamp, and configuring `with_timestamp_config` on a `Sealed` or `Plain` instance has no effect on the output.
+  Timestamp prefixing only works in `Open` mode. `Sealed` mode does not prepend a timestamp, and configuring `with_timestamp_config` on a `Sealed` or `Plain` instance has no effect on the output.
 </Note>
 
 ## Sorting by timestamp
@@ -110,7 +121,7 @@ hce encode --mode open --timestamp-epoch 1700000000000 \
 ## UUID adapter and UUIDv7
 
 <Tip>
-When working with UUIDv7 identifiers, use the `UuidAdapter` from `hce-adapters` together with Open mode. HCE automatically extracts the 48-bit millisecond timestamp embedded in the UUIDv7 bytes and uses the identifier's own creation time as the prefix source — no separate `with_timestamp_config` call required.
+  When working with UUIDv7 identifiers, use the `UuidAdapter` from `hce-adapters` together with Open mode. HCE automatically extracts the 48-bit millisecond timestamp embedded in the UUIDv7 bytes and uses the identifier's own creation time as the prefix source — no separate `with_timestamp_config` call required.
 </Tip>
 
 ```rust

@@ -11,9 +11,20 @@ When an HCE string is read aloud, written down, or communicated verbally, the so
 A level is not a hand-curated list. It is the output of two filters applied to a phonological database:
 
 1. **PHOIBLE coverage.** [PHOIBLE](https://phoible.org/) catalogues the phoneme inventories of 3,000\+ documented languages. A phoneme qualifies for a level only if it appears in at least a target percentage of those inventories — 85% for `Universal`, lower thresholds for the more region-specific levels. This is what makes Universal genuinely _universal_: every consonant and vowel in it is a sound that almost every speaker on Earth already produces in their native language.
-2. **Sonority Sequencing Principle (SSP).** Consonant clusters are not enumerated by hand. Instead, every candidate onset cluster is checked against SSP: sonority must rise toward the vowel. `tr` (stop → liquid) and `bl` (stop → liquid) pass. `tl`, `dl`, `pt`, and `sm` fail and are dropped, even though they are spellable in some writing systems, because listeners mis-syllabify them under noise.
+2. **Sonority Sequencing Principle (SSP).** Consonant clusters are not enumerated by hand. Every candidate cluster is checked against SSP, a cross-linguistic constraint that says sonority must rise toward the vowel peak. The standard sonority scale is:
 
-Tightening either filter — raising the PHOIBLE threshold or relaxing SSP — produces a different level. That is how `Eu` and `En` are derived: same algorithm, narrower thresholds, different phonemic territory.
+| Class | Sonority | Examples |
+| --- | --- | --- |
+| Stop | 1 | `b d g k p t` |
+| Fricative | 1.5 | `s f h` |
+| Nasal | 2 | `m n` |
+| Liquid | 3 | `l r` |
+| Glide | 4 | `j w` |
+| Vowel | 5 | `a e i o u` |
+
+A cluster is admitted only if the sonority difference between its two consonants meets the level's `MIN_DIST`. `tr` (stop 1 → liquid 3, difference 2) clears easily. `fl` and `fr` (fricative 1.5 → liquid 3, difference 1.5) clear at the relaxed `MIN_DIST = 1.5` used in `Universal`. `pt` (stop → stop, difference 0) fails. `st`, `sp`, and `sk` actually fall in sonority and violate SSP outright — they are dropped from `Universal` and only re-introduced in language-specific levels where speakers tolerate the irregularity.
+
+Tightening either filter — raising the PHOIBLE threshold or relaxing the SSP `MIN_DIST` — produces a different level. That is how `Eu` and `En` are derived: same algorithm, narrower thresholds, different phonemic territory.
 
 ## Level Comparison
 

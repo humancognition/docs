@@ -6,26 +6,22 @@ description: "Control how HCE breaks encoded strings into readable segments usin
 
 By default, HCE groups syllables into natural-feeling chunks separated by hyphens — for example, `PETREN-NISLORPEN-LAFLER`. You can override this behaviour with one of three explicit chunking strategies and, independently, swap the separator character for any symbol that does not conflict with the phoneme alphabet. These two knobs let you tune output for human readability, URL safety, database storage, or any other downstream constraint.
 
-## Why Chunking at All
-
-Chunking exists because human short-term memory has a hard ceiling. Cowan's work on working memory shows that adults reliably hold about four chunks of information at a time — the same reason phone numbers, credit cards, IBANs, and software licence keys are all displayed in small grouped segments rather than as continuous runs. A 14-syllable HCE string presented as one block would force a listener to track far more units than working memory can hold; the same string broken into four to five chunks of three or four syllables each fits comfortably and dramatically reduces verbal transcription errors.
-
-The natural chunking strategy is designed to land in that 4-chunk window for the default 128-bit identifier length. Fixed and pattern strategies let you trade off readability against external formatting constraints (URL length budgets, database column widths, branded ID shapes), but for human-channel use cases the natural strategy is almost always what you want.
-
-## Chunk Boundaries are Lossless
-
-Chunking changes only how the string is _displayed_, never what it _encodes_. The chunk separators are stripped before any decoding work begins, so a user can paste an HCE string with the original hyphens, with no hyphens, with extra hyphens in the wrong places, or with hyphens replaced by spaces — the decoder normalises the input first and recomputes its own internal boundaries. This is the same principle that lets Crockford Base32 ignore hyphens: the canonical form is the syllable sequence, not the rendered string.
-
-Chunk boundaries themselves are derived deterministically from the ciphertext bits, not from a random salt or a new entropy source. That is what makes them "free": the boundaries are a function of bits HCE has already encoded, so they consume no additional bits of the identifier. Two different identifiers naturally produce two different chunk layouts, and the same identifier always produces the same layout — there is nothing to record or store.
-
 ## Why HCE Chunks at All
 
-Chunking is a working-memory accommodation. Cowan's research shows adults reliably hold about 4±1 _chunks_ — not characters — in short-term memory. A 32-character hex UUID forces a listener to track ~28 unrelated chunks and falls apart over the phone; a phone number broken into three groups stays within the limit and is dictated reliably every day. HCE's default layout aims for the same target: 4–5 chunks of similar length so that a customer reading an identifier back to support can hold the whole thing in working memory after one hearing.
+Chunking is not cosmetic in the way phone-number formatting is cosmetic. It is the mechanism HCE uses to fit a 128-bit identifier inside Cowan's [4±1 working-memory limit](https://en.wikipedia.org/wiki/Working_memory#Capacity). Cowan's research on working memory shows that adults reliably hold about four _chunks_ — not characters — in short-term memory at once. A 32-character hex UUID asks a listener to track ~28 unrelated chunks and breaks down over the phone; the same identifier rendered as four or five hyphen-separated syllable groups lands inside that limit, which is why every successful human-friendly identifier scheme — phone numbers (`555-123-4567`), credit cards (`4111 1111 1111 1111`), IBANs, software licence keys — does the same thing.
 
-Two implementation details make this safe to use without changing your bytes:
+The default natural chunking is tuned to produce four to five chunks for a 128-bit input. That number is not chosen by trial and error; it is the upper end of what an adult can reliably read back over the phone after a single hearing. Fixed and pattern strategies let you trade off readability against external constraints (URL length budgets, database column widths, branded ID shapes), but for human-channel use cases the natural strategy is almost always what you want.
 
-- **Boundaries are derived, not random.** The natural chunk positions are computed deterministically from bits already present in the FPE ciphertext, so they consume zero additional entropy. The same input always produces the same chunk layout.
-- **Separators are not data.** The decoder strips every separator before parsing. A user can paste the string with hyphens, with spaces, with line breaks, or with none at all — the canonical token stream is unchanged. This matches the [Crockford Base32 convention](https://www.crockford.com/base32.html) and means chunking is purely a display concern.
+### Lossless by construction
+
+Two implementation details make chunking safe to use without changing your bytes:
+
+- **Boundaries are derived, not random.** Chunk positions are computed deterministically from the FPE ciphertext bits that have already been counted toward the 128-bit budget. The boundaries read from bits that are "already paid for" — they consume **zero additional entropy**. The same input always produces the same chunk layout, and there is nothing extra to store.
+- **Separators are not data.** The decoder strips every separator (hyphens, spaces, line breaks, even mixed or wrong-position separators) before parsing, then recomputes its own internal boundaries. A user can paste the identifier with the original hyphens, with no hyphens, or with hyphens replaced by spaces and the result is identical. This is the same separator-ignoring philosophy used by [Crockford Base32](https://www.crockford.com/base32.html): the canonical form is the syllable sequence, not the rendered string.
+
+### Syllable-aligned boundaries
+
+The natural chunker never splits a syllable. Because a single HCE syllable carries a fixed onset-plus-nucleus pair (with the cluster onset and optional coda treated as one indivisible unit), every chunk boundary falls on a syllable seam. This is what keeps the output pronounceable when read chunk-by-chunk: every chunk is itself a sequence of complete syllables, so a listener can rehearse each chunk through the [phonological loop](https://en.wikipedia.org/wiki/Working_memory) independently before assembling the full identifier.
 
 ## Chunking strategies
 

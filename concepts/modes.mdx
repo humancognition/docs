@@ -17,6 +17,8 @@ All three modes share the same encoding pipeline; they differ only in what is mi
 
 In `Open` mode, HCE additionally extracts the timestamp from the input (for UUIDv7, the leading 48 bits) and renders a short two-syllable prefix in front of the encrypted body. The prefix is derived deterministically from the timestamp; it is not new randomness, so it does not change the body's encryption. This is what makes Open strings sortable: the prefix is monotone in time, so lexicographic ordering of strings agrees with chronological ordering of the underlying identifiers.
 
+The prefix is intentionally **audible**, not just sortable. Conventional time-ordered identifiers like UUIDv7 and ULID embed a timestamp at the bit level, which is machine-readable but invisible to a human reading a log line. Open inverts that: the time information is exposed as two real syllables (e.g. `KA-RE`, `KI-RU`) that a person can read aloud and immediately recognise as "this identifier is from the early period" or "this one is much more recent". Because the prefix is computed monotonically from the time bucket, the same vowel sequence also sorts correctly under a plain string sort — visual ordering and auditory ordering agree.
+
 ## Mode Comparison
 
 | Mode | Check | Timestamp prefix | Purpose |
@@ -73,8 +75,13 @@ The prefix is also **audible**: it is rendered as two real syllables (for exampl
 **What it guarantees:**
 
 - Lexicographic order of encoded strings matches chronological order of the underlying identifiers.
-- The payload is still fully encrypted; only relative ordering is revealed.
+- The payload — including the embedded timestamp — is still fully FPE-encrypted, exactly as in Sealed mode. The body alone reveals nothing about the time of creation.
+- Only the leading audible prefix exposes the time bucket. The rest of the identifier is no more decipherable than in Sealed mode.
 - HMAC-SHA256 integrity check — the same tamper detection as Sealed mode.
+
+<Warning>
+  Because the Open prefix exposes the rough creation time in plaintext, do not use Open mode for identifiers in public URLs or external APIs where leaking creation time is a privacy concern. Use Open for internal logs and debugging, and use Sealed for everything customer-facing.
+</Warning>
 
 The prefix is **derived** from the timestamp, not extracted from the payload. Open mode encrypts the entire identifier — timestamp bits included — exactly the same way Sealed mode does. It then computes a short sortable prefix as a separate function of the timestamp and prepends it for display. This is why decoding an Open-mode string in Sealed-mode configuration still works on the body but ignores ordering: the prefix carries no entropy of its own, only a re-derivable view of time. Without the key the prefix is the only thing an observer learns; the rest of the identifier remains opaque.
 
