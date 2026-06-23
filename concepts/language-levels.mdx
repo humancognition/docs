@@ -6,11 +6,20 @@ description: "HCE's four language levels — Universal, Eu, En, and Numeric — 
 
 When an HCE string is read aloud, written down, or communicated verbally, the sounds it contains matter. HCE uses different **language levels** to select phoneme sets that feel natural to speakers of different languages. Every level shares the same mathematical structure — 35 onsets, 20 vowel nuclei, radix 700 — so they all produce output of identical length. The only difference is which actual sounds (and their written representations) are used.
 
+## How a Phoneme Set is Chosen
+
+A level is not a hand-curated list. It is the output of two filters applied to a phonological database:
+
+1. **PHOIBLE coverage.** [PHOIBLE](https://phoible.org/) catalogues the phoneme inventories of 3,000\+ documented languages. A phoneme qualifies for a level only if it appears in at least a target percentage of those inventories — 85% for `Universal`, lower thresholds for the more region-specific levels. This is what makes Universal genuinely _universal_: every consonant and vowel in it is a sound that almost every speaker on Earth already produces in their native language.
+2. **Sonority Sequencing Principle (SSP).** Consonant clusters are not enumerated by hand. Instead, every candidate onset cluster is checked against SSP: sonority must rise toward the vowel. `tr` (stop → liquid) and `bl` (stop → liquid) pass. `tl`, `dl`, `pt`, and `sm` fail and are dropped, even though they are spellable in some writing systems, because listeners mis-syllabify them under noise.
+
+Tightening either filter — raising the PHOIBLE threshold or relaxing SSP — produces a different level. That is how `Eu` and `En` are derived: same algorithm, narrower thresholds, different phonemic territory.
+
 ## Level Comparison
 
-| Level | Onsets | Vowel + Nucleus | Best For |
-|-------|--------|-----------------|----------|
-| `Universal` | 35 | 20 | Cross-lingual; phonemes present in 40%+ of PHOIBLE languages |
+| Level | Onsets | Vowel \+ Nucleus | Best For |
+| --- | --- | --- | --- |
+| `Universal` | 35 | 20 | Cross-lingual; phonemes present in ≥85% of PHOIBLE languages |
 | `Eu` | 35 | 20 | European language speakers |
 | `En` | 35 | 20 | English-only environments |
 | `Numeric` | 35 | 20 | Numeric-style text representations |
@@ -21,7 +30,7 @@ All four levels use the **same radix** (700 = 35 × 20), so a 128-bit identifier
 
 ## Universal
 
-Universal is the recommended default. Its phonemes are drawn from sounds that appear in at least 40% of the world's languages according to the [PHOIBLE](https://phoible.org/) database. That means a Universal-encoded string will be reasonably pronounceable by speakers of most major languages — including speakers of East Asian, South Asian, African, and European languages — without requiring them to contort to unfamiliar sounds.
+Universal is the recommended default. Its phonemes are drawn from the PHOIBLE inventory at an ≥85% language-coverage threshold — `/m/` (98.8%), `/k/` (94.3%), `/n/` (91.7%), `/s/` (88.2%), `/p/` (85.7%), and so on for the consonants; `/a/`, `/i/`, `/u/`, `/e/`, `/o/` for the vowels. That means a Universal-encoded string is built entirely from sounds that already exist in the listener's native phonology, regardless of whether they are a Mandarin, Hindi, Yoruba, Spanish, or German speaker. Cluster onsets are limited to stop\+liquid and fricative\+liquid pairs that pass SSP, which is why `KRUMA` is pronounceable in nearly every language but `KTUMA` would not appear in HCE output at all.
 
 Single consonant onsets include: `b`, `d`, `g`, `k`, `m`, `n`, `p`, `t`, `s`, `l`, `r`, `f`, `h`, `j`, `w`.
 
@@ -33,13 +42,13 @@ Vowel nuclei are plain vowels (`a`, `e`, `i`, `o`, `u`) and vowel-plus-coda comb
 
 ## Eu
 
-The `Eu` level is tuned for **European language speakers**. It may include consonant clusters and vowel combinations that are natural in Germanic, Romance, and Slavic languages but less familiar in other language families. Use `Eu` when you know your audience reads and speaks predominantly European languages and you want to maximise naturalness for that group.
+The `Eu` level is tuned for **European language speakers**. It is `Universal` plus the consonant clusters that PHOIBLE shows are widespread in Germanic, Romance, and Slavic inventories but not universal — for example, additional fricative\+stop and liquid\+stop combinations. SSP is still enforced, so clusters that would stall the phonological loop are still excluded. Use `Eu` when you know your audience reads and speaks predominantly European languages and you want to maximise naturalness for that group.
 
 ---
 
 ## En
 
-The `En` level targets **English speakers** specifically. Its phoneme set focuses on sounds and spellings that are comfortable and unambiguous for native English readers. If your product is exclusively English-language and your users will always type or speak identifiers in English contexts, `En` can minimise mispronunciation caused by ambiguous spelling conventions.
+The `En` level targets **English speakers** specifically. It is `Eu` plus English-licensed clusters that violate SSP in a strict reading but are well-established in English orthography and speech (`st`, `sp`, `sk`, `sm`, `sw`, `tw`). These clusters are comfortable for English readers but can be mis-syllabified by speakers of languages without `s+stop` onsets, which is why HCE keeps them in a dedicated level rather than promoting them to `Universal`. Choose `En` only when your audience is reliably English-first.
 
 ---
 

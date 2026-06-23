@@ -6,10 +6,21 @@ description: "Sealed, Open, and Plain modes control HCE's encryption strength, t
 
 HCE gives you three modes that control how your encoded strings are protected and structured. Sealed mode provides full confidentiality with HMAC-SHA256 integrity. Open mode adds a timestamp prefix so strings sort chronologically. Plain mode skips encryption entirely and uses a lightweight CRC check instead. Choosing the right mode depends on your security requirements and whether you need the output to be lexicographically sortable.
 
+The mode you choose is also baked into the FPE **tweak** — a public parameter that conditions the Feistel cipher without consuming entropy. Because mode is part of the tweak, the same UUID produces a different encoded body in `Sealed` versus `Open` versus `Plain`, and a string encoded in one mode cannot be decoded by a codec configured in another. This separation is what lets `Open` expose ordering information safely: the body stays fully encrypted, and only a small derived prefix carries the sortable signal.
+
+## How a Mode is Enforced
+
+All three modes share the same encoding pipeline; they differ only in what is mixed into the FPE _tweak_ and whether a timestamp prefix is rendered. A tweak is a public, non-secret input to the cipher that changes the permutation without consuming entropy. HCE puts the mode byte and the language level into the tweak, which has two consequences:
+
+- A `Sealed` codec and an `Open` codec configured with the _same_ key produce _different_ output for the same input, because their tweaks differ. You cannot accidentally decode a Sealed string with an Open codec, even if the keys match.
+- The mode and level do not need to be embedded inside the encrypted payload — they are part of the routing configuration on both sides. The full 128 bits of the input go into the cipher untouched, so no entropy is sacrificed to carry mode metadata.
+
+In `Open` mode, HCE additionally extracts the timestamp from the input (for UUIDv7, the leading 48 bits) and renders a short two-syllable prefix in front of the encrypted body. The prefix is derived deterministically from the timestamp; it is not new randomness, so it does not change the body's encryption. This is what makes Open strings sortable: the prefix is monotone in time, so lexicographic ordering of strings agrees with chronological ordering of the underlying identifiers.
+
 ## Mode Comparison
 
 | Mode | Check | Timestamp prefix | Purpose |
-|------|-------|-----------------|---------|
+| --- | --- | --- | --- |
 | `Sealed` | HMAC-SHA256 | No | Full confidentiality and integrity |
 | `Open` | HMAC-SHA256 | Yes (from input) | Sortable, timestamp-prefixed identifiers |
 | `Plain` | CRC | No | No encryption; CRC integrity only |
@@ -23,6 +34,7 @@ Sealed mode is the default choice for any identifier that should be opaque to ob
 **When to use it:** User IDs, session tokens, order numbers, internal record references — any identifier where you do not want the encoded string to reveal ordering or timing information.
 
 **What it guarantees:**
+
 - The output reveals nothing about the input without your key.
 - Any modification to the string (even a single character swap) is detected on decode.
 - Two identical inputs always produce the same output with the same key (deterministic).
@@ -54,12 +66,17 @@ assert_eq!(decoded, uuid_bytes.to_vec());
 
 Open mode is designed for distributed systems that need both encryption and **chronological sort order**. When you encode a UUID v7 or any timestamp-bearing identifier, HCE extracts the timestamp component and prepends a short sortable prefix to the output string. The rest of the encoding — FPE encryption and HMAC-SHA256 check syllables — is identical to Sealed mode.
 
+The prefix is also **audible**: it is rendered as two real syllables (for example `KA-RE`), one mapped from the high-order time bucket and one from the low-order bucket. A human reading the log can tell the rough generation date of an identifier without decoding it, and a screen reader will pronounce it as two short words. This is the "audible timestamp" property — sortable for machines, recognisable for people.
+
 **When to use it:** Time-ordered distributed IDs (similar to UUIDv7 or ULID), event logs, audit trails, or any context where you want to sort encoded identifiers without decrypting them.
 
 **What it guarantees:**
+
 - Lexicographic order of encoded strings matches chronological order of the underlying identifiers.
 - The payload is still fully encrypted; only relative ordering is revealed.
 - HMAC-SHA256 integrity check — the same tamper detection as Sealed mode.
+
+The prefix is **derived** from the timestamp, not extracted from the payload. Open mode encrypts the entire identifier — timestamp bits included — exactly the same way Sealed mode does. It then computes a short sortable prefix as a separate function of the timestamp and prepends it for display. This is why decoding an Open-mode string in Sealed-mode configuration still works on the body but ignores ordering: the prefix carries no entropy of its own, only a re-derivable view of time. Without the key the prefix is the only thing an observer learns; the rest of the identifier remains opaque.
 
 <Tip>
   Open mode is ideal for distributed ID generation where multiple services emit identifiers independently. Because the output is lexicographically sortable, you can merge streams from different services and maintain a correct time order without a central coordinator — similar to UUIDv7 but with a human-readable, pronounceable representation.
@@ -97,6 +114,7 @@ Plain mode disables encryption entirely. The Feistel cipher still runs — using
 **When to use it:** Development and debugging, non-sensitive display codes, human-readable serial numbers where privacy is not a concern and you only want a stable, reproducible encoding.
 
 **What it guarantees:**
+
 - Deterministic output with no key required.
 - CRC integrity check catches accidental corruption (e.g. a typo in a manually transcribed code).
 - Self-recovery is **not** available in Plain mode.

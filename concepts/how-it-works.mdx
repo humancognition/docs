@@ -6,6 +6,14 @@ description: "HCE transforms binary identifiers into pronounceable strings throu
 
 When you call `hce.encode()`, HCE takes your raw bytes, encrypts them in-place using a Feistel-based format-preserving cipher, and then maps each encrypted integer value to a sequence of human-readable syllables. The result is a string like `PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN` — fully reversible, exactly the same length every time, and impossible to decode without your secret key.
 
+## Design Principles
+
+Three principles shape every step of the pipeline, and they explain _why_ HCE is built the way it is:
+
+1. **Human-friendly properties are not produced by probability.** Earlier pronounceable-ID schemes used transition probabilities to "encourage" syllable boundaries; this introduced a non-uniform output distribution and silently destroyed entropy. HCE instead uses three lossless techniques — reading bits already present in the ciphertext, forcing patterns through the public FPE _tweak_, and deriving consonant clusters from deterministic rules — so the output remains uniformly distributed across the full input domain.
+2. **Storage and display are separate layers.** Your database key stays a 16-byte binary UUID. HCE is the _display format_ — produced on output, consumed on input — so index locality, join performance, and schema migrations are unaffected.
+3. **Every transformation is a bijection.** Mixed-radix expansion, the Feistel FPE round function, and the deterministic chunk-boundary computation are all invertible. Composing bijections produces a bijection, which is the structural reason `decode(encode(x)) == x` holds for every input.
+
 ## The Encoding Pipeline
 
 <Steps>
@@ -13,17 +21,17 @@ When you call `hce.encode()`, HCE takes your raw bytes, encrypts them in-place u
     Your input bytes are loaded into a 128-bit integer (or a smaller domain if you call `with_bit_width()` or `with_modulus()`). If you pass fewer bytes than the domain requires, the buffer is zero-padded. Every value in the domain has exactly one corresponding HCE string — the mapping is bijective.
   </Step>
   <Step title="Format-preserving encryption (FPE) is applied">
-    HCE applies a format-preserving encryption cipher keyed by your secret key. The cipher operates entirely within the configured domain — the encrypted value is always a valid integer in the same range as the plaintext. This is what makes the encoding format-preserving: bit-width in, same bit-width out.
+    HCE applies a format-preserving encryption cipher keyed by your secret. The cipher operates entirely within the configured domain — a 128-bit input produces a 128-bit ciphertext — and it is a _bijection_, so no entropy is lost. This is the property that earlier probability-based pronounceable encodings sacrificed; HCE keeps the full 128 bits because every FPE round is reversible.
 
-    The cipher is parameterised by your key, the language level, the mode, and the domain width. Two codecs configured with different levels or modes will produce different output even for the same key and input.
+    Concretely, an 8-round Feistel network with HMAC-SHA256 as the round function permutes the integer space. The cipher accepts a public _tweak_ that mixes in the language level, mode, and any other configuration that must influence the output without consuming entropy. Two codecs configured with different levels or modes produce different output even for the same key and input, because their tweaks differ.
   </Step>
   <Step title="Encrypted integer maps to phonemic syllables">
-    The encrypted integer is converted to a sequence of syllable tokens using a mixed-radix encoding. Each syllable consists of:
+    The ciphertext is converted to a sequence of syllable tokens using **mixed-radix** expansion. Each syllable has two positions, and each position has its own radix:
 
-    - An **onset** (consonant or consonant cluster) — 35 choices
-    - A **vowel nucleus** (plain vowel or vowel + coda) — 20 choices
+    - An **onset** (single consonant or SSP-compliant cluster) — 35 choices
+    - A **vowel nucleus** (plain vowel or vowel \+ coda) — 20 choices
 
-    Together, each syllable encodes one of **700** (35 × 20) possible values. A 128-bit input requires approximately **14 body syllables** to represent the full value.
+    Together each syllable encodes one of **700** values, so 128 bits expands to roughly 14 syllables. Mixed-radix is used instead of a power-of-two encoding because the phoneme inventories are not powers of two; choosing radices that match the actual _phonetic_ inventory means every syllable HCE emits is a valid pronounceable shape with no padding or rejection sampling. The expansion is a bijection — the same `mod`/`div` chain runs in reverse during decode.
   </Step>
   <Step title="Check syllables are appended">
     After the body syllables are produced, HCE appends **check syllables** for integrity verification. The number of check syllables is configurable (default: 1; range: 1–8):
@@ -36,27 +44,41 @@ When you call `hce.encode()`, HCE takes your raw bytes, encrypts them in-place u
   <Step title="Syllables are chunked and joined">
     The body syllables and check syllable(s) are rendered as text (uppercase by default) and grouped into chunks separated by a configurable separator character (default: `-`). The default "natural" chunk layout produces five body chunks plus one check chunk for 128-bit input, resulting in strings like `XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XX`.
 
-    You can control chunking with `with_chunk_spec()` using fixed-width, pattern-based, or no chunking at all.
+    Chunking is purely cosmetic and **lossless**. The boundary positions are computed from bits already present in the ciphertext, so they consume no additional entropy. Separators are stripped before decoding, which means a user can paste the string with hyphens, with spaces, or with no separators at all — the decoder always sees the same canonical token stream.
+
+    You can override the layout with `with_chunk_spec()` using fixed-width, pattern-based, or no chunking at all.
   </Step>
 </Steps>
+
+## Why Chunking Matters
+
+The chunk boundaries are not just aesthetic. They are placed so that the output lands inside Cowan's 4±1 working-memory limit — the same constraint that shapes phone numbers (`555-123-4567`) and credit cards (`4111 1111 1111 1111`). A 32-character hex UUID forces a listener to track ~28 unrelated chunks; the same identifier encoded by HCE is 4–5 chunks of similar length, which is at the upper end of what an adult can reliably read back over the phone after one hearing.
+
+The chunk layout is also where HCE's claim of "no silent entropy loss" is most concrete. Earlier pronounceable schemes inserted breaks based on per-character transition probabilities, which biased the output distribution. HCE instead reads boundary positions out of the FPE ciphertext, so the chunk layout is a function of bits that were already counted toward the 128-bit budget. No bit is consumed twice, and no bit goes unused.
 
 ## Format Preservation
 
 One of HCE's defining properties is that the **output length is fully determined by your configuration** — it never varies across different input values. For the default 128-bit domain with one check syllable, you always get the same syllable count regardless of what the input bytes are.
 
 | Domain (bit width) | Body syllables | Check syllables (default) | Total syllables |
-|--------------------|---------------|--------------------------|-----------------|
-| 128-bit            | ~13–14        | 1                        | ~14–15          |
-| 64-bit             | ~7            | 1                        | ~8              |
-| 32-bit             | ~4            | 1                        | ~5              |
+| --- | --- | --- | --- |
+| 128-bit | ~13–14 | 1 | ~14–15 |
+| 64-bit | ~7 | 1 | ~8 |
+| 32-bit | ~4 | 1 | ~5 |
 
 This predictability makes HCE safe to use in fixed-width database columns and display fields without length-checking logic.
 
 ## The Phoneme System
 
-HCE encodes values in **radix 700**: 35 possible onsets multiplied by 20 possible vowel nuclei. Onsets are either single consonants (`b`, `d`, `g`, `k`, `m`, `n`, `p`, `t`, `s`, `l`, `r`, `f`, `h`, `j`, `w`) or two-letter consonant clusters (`bl`, `br`, `dr`, `fl`, `fr`, `gl`, `gr`, `kl`, `kr`, `pl`, `pr`, `sl`, `sr`, `tr`, `st`, `sp`, `sk`, `sm`, `sw`, `tw`). Vowel nuclei are plain vowels (`a`, `e`, `i`, `o`, `u`) or vowel-plus-coda combinations (`an`, `al`, `ar`, `en`, `el`, `er`, `in`, `il`, `ir`, `on`, `ol`, `or`, `un`, `ul`, `ur`).
+HCE encodes values in **radix 700**: 35 possible onsets multiplied by 20 possible vowel nuclei.
 
-Combining a consonant onset with a vowel nucleus produces a syllable like `ba`, `dren`, `flo`, or `krul`. These patterns are pronounceable across a wide range of languages because the phonemes are chosen from sounds that appear in at least 40% of the world's languages (the Universal level). The four [language levels](/concepts/language-levels) let you tune the phoneme set for your audience.
+**Onsets** are either single consonants (`b`, `d`, `g`, `k`, `m`, `n`, `p`, `t`, `s`, `l`, `r`, `f`, `h`, `j`, `w`) or two-letter consonant clusters (`bl`, `br`, `dr`, `fl`, `fr`, `gl`, `gr`, `kl`, `kr`, `pl`, `pr`, `sl`, `sr`, `tr`, `st`, `sp`, `sk`, `sm`, `sw`, `tw`). The clusters are not an arbitrary list — they are generated by the **Sonority Sequencing Principle (SSP)**, a cross-linguistic rule which says a syllable's sonority must rise toward its vowel peak. Stop \+ liquid (`tr`, `bl`) rises sharply and is pronounceable in almost every language; stop \+ stop (`pt`) violates the rule and is dropped. This is why HCE does not ship clusters like `tl` or `dl`: SSP rejects them, so listeners would mis-syllabify them.
+
+**Vowel nuclei** are plain vowels (`a`, `e`, `i`, `o`, `u`) or vowel-plus-coda combinations (`an`, `al`, `ar`, `en`, `el`, `er`, `in`, `il`, `ir`, `on`, `ol`, `or`, `un`, `ul`, `ur`). Mixing open syllables (`KO`, `TRA`) with closed syllables (`KON`, `TRAR`) gives the output the rhythm of real words rather than the dense `C-C-C-C` runs that trigger [articulatory suppression](https://en.wikipedia.org/wiki/Articulatory_suppression_effect) and stall the phonological loop.
+
+The coda inventory is deliberately small — only `n`, `l`, and `r` — and none of those letters appear as the first character of an onset cluster. That single property guarantees the decoder can parse any HCE string in a **single forward pass with one character of lookahead**: when it sees a consonant after a vowel, it can tell whether it is the coda of the current syllable or the onset of the next one without ever backtracking.
+
+Combining a consonant onset with a vowel nucleus produces a syllable like `ba`, `dren`, `flo`, or `krul`. The four [language levels](/concepts/language-levels) let you tune the phoneme set for your audience while preserving the same radix and output length.
 
 ## Encode and Decode Roundtrip
 

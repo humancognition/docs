@@ -6,15 +6,36 @@ description: "Control how HCE breaks encoded strings into readable segments usin
 
 By default, HCE groups syllables into natural-feeling chunks separated by hyphens — for example, `PETREN-NISLORPEN-LAFLER`. You can override this behaviour with one of three explicit chunking strategies and, independently, swap the separator character for any symbol that does not conflict with the phoneme alphabet. These two knobs let you tune output for human readability, URL safety, database storage, or any other downstream constraint.
 
+## Why Chunking at All
+
+Chunking exists because human short-term memory has a hard ceiling. Cowan's work on working memory shows that adults reliably hold about four chunks of information at a time — the same reason phone numbers, credit cards, IBANs, and software licence keys are all displayed in small grouped segments rather than as continuous runs. A 14-syllable HCE string presented as one block would force a listener to track far more units than working memory can hold; the same string broken into four to five chunks of three or four syllables each fits comfortably and dramatically reduces verbal transcription errors.
+
+The natural chunking strategy is designed to land in that 4-chunk window for the default 128-bit identifier length. Fixed and pattern strategies let you trade off readability against external formatting constraints (URL length budgets, database column widths, branded ID shapes), but for human-channel use cases the natural strategy is almost always what you want.
+
+## Chunk Boundaries are Lossless
+
+Chunking changes only how the string is _displayed_, never what it _encodes_. The chunk separators are stripped before any decoding work begins, so a user can paste an HCE string with the original hyphens, with no hyphens, with extra hyphens in the wrong places, or with hyphens replaced by spaces — the decoder normalises the input first and recomputes its own internal boundaries. This is the same principle that lets Crockford Base32 ignore hyphens: the canonical form is the syllable sequence, not the rendered string.
+
+Chunk boundaries themselves are derived deterministically from the ciphertext bits, not from a random salt or a new entropy source. That is what makes them "free": the boundaries are a function of bits HCE has already encoded, so they consume no additional bits of the identifier. Two different identifiers naturally produce two different chunk layouts, and the same identifier always produces the same layout — there is nothing to record or store.
+
+## Why HCE Chunks at All
+
+Chunking is a working-memory accommodation. Cowan's research shows adults reliably hold about 4±1 _chunks_ — not characters — in short-term memory. A 32-character hex UUID forces a listener to track ~28 unrelated chunks and falls apart over the phone; a phone number broken into three groups stays within the limit and is dictated reliably every day. HCE's default layout aims for the same target: 4–5 chunks of similar length so that a customer reading an identifier back to support can hold the whole thing in working memory after one hearing.
+
+Two implementation details make this safe to use without changing your bytes:
+
+- **Boundaries are derived, not random.** The natural chunk positions are computed deterministically from bits already present in the FPE ciphertext, so they consume zero additional entropy. The same input always produces the same chunk layout.
+- **Separators are not data.** The decoder strips every separator before parsing. A user can paste the string with hyphens, with spaces, with line breaks, or with none at all — the canonical token stream is unchanged. This matches the [Crockford Base32 convention](https://www.crockford.com/base32.html) and means chunking is purely a display concern.
+
 ## Chunking strategies
 
 The four strategies below are mutually exclusive. Set whichever one fits your use case; the last call to `with_chunk_spec` wins.
 
 | Strategy | Method | Description |
-|---|---|---|
+| --- | --- | --- |
 | Natural (default) | `with_chunk_spec(ChunkSpec::natural_with_separator('-'))` | Groups syllables into word-like chunks using a built-in heuristic, separated by hyphens |
 | None | `with_chunk_spec(ChunkSpec::none())` | Produces a single continuous string with no separators |
-| Fixed | `with_chunk_spec(ChunkSpec::fixed(n))` | Inserts a separator after approximately every *n* characters |
+| Fixed | `with_chunk_spec(ChunkSpec::fixed(n))` | Inserts a separator after approximately every _n_ characters |
 | Pattern | `with_chunk_spec(ChunkSpec::pattern(&[3, 4, 4, 3]))` | Applies a repeating cycle of custom syllable counts per chunk |
 
 ### Natural chunking
@@ -54,12 +75,12 @@ let id = hce.encode(&uuid_bytes);
 ```
 
 <Tip>
-Use `ChunkSpec::none()` when persisting HCE strings in a database. The absence of separator characters reduces storage size and eliminates the need for any separator-stripping logic when indexing or querying the column.
+  Use `ChunkSpec::none()` when persisting HCE strings in a database. The absence of separator characters reduces storage size and eliminates the need for any separator-stripping logic when indexing or querying the column.
 </Tip>
 
 ### Fixed chunking
 
-`ChunkSpec::fixed(n)` places a separator after approximately every *n* characters. The engine finds the nearest syllable boundary to keep chunks phonetically clean.
+`ChunkSpec::fixed(n)` places a separator after approximately every _n_ characters. The engine finds the nearest syllable boundary to keep chunks phonetically clean.
 
 ```rust
 use hce_core::{ChunkSpec, Hce, HceMode, LanguageLevel};

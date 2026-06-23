@@ -6,6 +6,26 @@ description: "HCE's self-recovery system corrects common phoneme confusions like
 
 When an identifier is read aloud over a phone call, hand-written on paper, or typed from memory, small errors are inevitable. A speaker might say "bren" but a listener hears "blen". Someone copying from a screen might write "droflin" instead of "drofrin". HCE's self-recovery system addresses this directly: given a string that fails its integrity check, `hce.recover()` searches the confusion matrix — a catalogue of phoneme pairs that are commonly mistaken for one another — and attempts to find a single-token correction that restores a valid check. If exactly one correction works, the identifier is returned corrected. If several corrections are plausible, the result is marked ambiguous. If none work, the string is rejected.
 
+## Why a Confusion Matrix, Not a Generic Edit Distance
+
+Naive error correction would try every single-character substitution and look for one that produces a valid checksum. That approach has two problems: the search space is huge (every character × every other character), and most candidates correspond to mistakes humans never actually make. HCE replaces "any character could become any other character" with a small, empirically grounded set of swaps drawn from phoneme confusion studies (Meyer 2007 and related work on auditory and orthographic phoneme errors). The pairs that appear in the matrix are the ones speakers and listeners actually confuse — voiced/unvoiced stop pairs sharing a place of articulation (`b`↔`p`, `d`↔`t`, `g`↔`k`), nasals at adjacent places (`m`↔`n`), the lateral/rhotic distinction (`l`↔`r`) that propagates into clusters (`bl`↔`br`, `pl`↔`pr`), and coda swaps within the `{n, l, r}` set.
+
+This is also why the syllable alphabet was designed alongside the recovery system rather than independently. The coda inventory is deliberately restricted to `{n, l, r}` so that a coda character can never be confused for the first letter of a cluster onset (`{b, d, g, k, p, t, f, s}`) — the two sets are disjoint. Without that disjointness, a sequence like `…anko…` would be parsable as either `[an][ko]` (coda \+ onset) or `[a][nko]` (open vowel \+ impossible cluster), forcing the decoder to backtrack. With the disjointness in place, every HCE string parses left-to-right in a single pass, and the confusion search has a clean structural foundation: only phonologically plausible swaps need to be tried.
+
+## Why a Confusion Matrix, Not a Checksum
+
+Classic checksums like Verhoeff and Damm are designed for the kinds of mistakes people make when _visually_ copying digits — adjacent transpositions, single-digit substitutions, common keypad slips. They are excellent in their lane, but they have nothing to say about the kinds of mistakes people make when _speaking_ and _hearing_ identifiers, because those mistakes are not random: they follow the structure of the human auditory and articulatory systems.
+
+Phoneticians have measured this structure directly. A **phoneme confusion matrix** records, for every pair of speech sounds, how often listeners mistake one for the other under noise. The matrix is sparse and predictable: `/m/` is confused with `/n/` (both nasals, same manner of articulation), `/b/` with `/v/` (both bilabial-adjacent, voiced), `/l/` with `/r/` (both liquids — the cross-linguistically famous confusion). It is _not_ confused with arbitrary distant sounds.
+
+HCE turns this matrix into a code distance:
+
+- Two tokens whose phonemes are at distance 1 in the confusion matrix are treated as neighbours.
+- A single misheard syllable moves the string by exactly one neighbour edge.
+- Recovery walks the local neighbourhood — a small, bounded set, not the entire token space — and asks the HMAC-SHA256 check whether each candidate is the original.
+
+This is why HCE recovers from realistic verbal errors that a CRC or Verhoeff check would only _detect_: the search space is shaped by how humans actually mis-speak, not by what is mathematically convenient.
+
 ## RecoveryResult Variants
 
 When you call `hce.recover()`, it returns a `Result<RecoveryResult, HceError>`. The inner `RecoveryResult` has four variants:
@@ -14,12 +34,15 @@ When you call `hce.recover()`, it returns a `Result<RecoveryResult, HceError>`. 
   <Card title="Ok" icon="circle-check">
     The string passed its integrity check without any correction. The original input was already valid — no changes were made.
   </Card>
+
   <Card title="Corrected(tokens)" icon="wand-magic-sparkles">
     Exactly one single-token correction was found that restores a valid HMAC-SHA256 check. The corrected token sequence is returned for you to decode.
   </Card>
+
   <Card title="Ambiguous(n)" icon="circle-question">
     Multiple valid corrections were found. The integer `n` is the number of candidates. You cannot auto-correct safely; prompt the user to re-read the identifier.
   </Card>
+
   <Card title="Reject" icon="circle-xmark">
     No correction in the confusion matrix produced a valid check. The string is too corrupted to recover with a single-token fix. Ask the user to re-enter the full identifier.
   </Card>
@@ -30,6 +53,7 @@ When you call `hce.recover()`, it returns a `Result<RecoveryResult, HceError>`. 
 The universal confusion matrix covers the phoneme pairs most commonly confused in verbal and handwritten communication:
 
 **Consonant onset confusions:**
+
 - `m` ↔ `n` — nasals that sound nearly identical in many accents
 - `b` ↔ `p` — voiced/unvoiced bilabial stops
 - `d` ↔ `t` — voiced/unvoiced alveolar stops
@@ -37,11 +61,13 @@ The universal confusion matrix covers the phoneme pairs most commonly confused i
 - `l` ↔ `r` — lateral vs. rhotic, frequently confused cross-linguistically
 
 **Consonant cluster confusions (l/r swap):**
+
 - `bl` ↔ `br`, `fl` ↔ `fr`, `gl` ↔ `gr`, `kl` ↔ `kr`
 - `pl` ↔ `pr`, `sl` ↔ `sr`, `dr` ↔ `dl` (where available)
 - `st` ↔ `sp`, `sk` ↔ `sm`, and related cluster pairs
 
 **Vowel nucleus confusions (coda swap):**
+
 - `an` ↔ `al`, `al` ↔ `ar`
 - `en` ↔ `el`, `el` ↔ `er`
 - `in` ↔ `il`, `il` ↔ `ir`

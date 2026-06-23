@@ -10,7 +10,22 @@ HCE is a lossless, encrypted codec that converts raw binary identifiers — UUID
 
 A raw UUID like `0195e3a0-7c2e-7b41-8f3d-9a6c1e0b4d27` is difficult to communicate verbally without errors, leaks structural information (version, variant, timestamp bits), and offers no integrity guarantee when transcribed by hand. Hex strings are worse: every character is visually ambiguous (`0` vs `O`, `1` vs `l`), there is no checksum, and they carry no encryption whatsoever.
 
-HCE solves all three problems at once. You encode your identifier once, store or transmit the result, and decode it back whenever you need the original bytes — with cryptographic assurance that nobody tampered with it in transit.
+The deeper problem is a mismatch between machines and people. Identifier domains grow without bound — more users, more events, more rows — but human short-term memory does not. Cowan's research on working memory shows that adults reliably hold only about 4±1 information chunks at a time. A 32-character hex UUID forces a listener to track ~28 unrelated chunks, far outside that limit, which is why phone numbers, credit cards, and product codes are universally broken into small grouped chunks instead.
+
+HCE solves this by aligning the identifier's representation with how people actually read and remember strings:
+
+- **Phonemic, not hexadecimal.** Every syllable is a real consonant-vowel-(coda) shape that the [phonological loop](https://en.wikipedia.org/wiki/Working_memory) can rehearse internally. There is no `0`/`O` or `1`/`l` ambiguity because the alphabet does not include those symbols.
+- **Chunked to 4±1.** The default layout produces 4–5 chunks of similar length, fitting comfortably into working memory.
+- **Tamper-evident.** A single misheard syllable is caught by the HMAC-SHA256 check at the end of the string, before any bytes are returned to your application.
+- **Self-correcting.** When a listener swaps `m` for `n` or `bl` for `br`, `hce.recover()` walks the phoneme confusion graph and fixes the mistake automatically — no second phone call required.
+
+You encode your identifier once, store or transmit the result, and decode it back whenever you need the original bytes — with cryptographic assurance that nobody tampered with it in transit.
+
+## A Display Layer, Not a Storage Format
+
+HCE is deliberately a **display layer**, not a replacement primary key. Your database still stores the canonical 16-byte UUID (or 8-byte Snowflake, 12-byte ObjectId, etc.) as a binary column, preserving index locality, join performance, and every existing tool that already understands UUID columns. HCE strings are produced only when bytes cross into a human channel — a UI, a log line, a phone call, a support ticket — and decoded back to bytes at the API boundary. This separation means adopting HCE never requires a schema migration, and switching keys or language levels never touches stored data.
+
+The same separation is what makes HCE safe to evolve. Because the canonical bytes live in storage, the encoding can change radix, chunk layout, or language level over time without rewriting existing records — each service simply re-encodes from bytes when it renders.
 
 ## Before and After
 
@@ -25,22 +40,22 @@ The output is chunked with dashes for readability, uses only phonemically valid 
 
 ### Encrypted
 
-HCE applies an 8-round HMAC-SHA256 Feistel Format-Preserving Encryption (FPE) cipher to your identifier before encoding it. The plaintext byte values are never visible in the output. In `Sealed` mode, the encoded string reveals nothing about the original identifier's structure. A built-in check syllable (derived from a final HMAC pass) ensures that any modification to the string is detected immediately on decode.
+HCE applies an 8-round HMAC-SHA256 Feistel Format-Preserving Encryption (FPE) cipher to your identifier before encoding it. FPE is the keystone of the design for three reasons at once: it is a _bijection_ on the input domain (so no entropy is lost), the output is uniformly distributed (so adjacent UUIDs do not produce visually adjacent HCE strings), and without the key the original bytes — including any embedded timestamp or sequence — are unrecoverable. A check syllable derived from a final HMAC pass detects any modification to the string before decode returns.
 
 ### Pronounceable
 
-The syllable alphabet is built from real phoneme data sourced from PHOIBLE, a cross-linguistic database of phoneme inventories. The default `Universal` level uses 35 phonemic onsets and 20 vowel nuclei — consonant-vowel pairs that appear in at least 40% of surveyed languages worldwide — giving a radix of 700 per syllable. This means the output is genuinely pronounceable in most major languages, not just ASCII soup that happens to lack digits.
+The syllable alphabet is built from real phoneme data sourced from [PHOIBLE](https://phoible.org/), a cross-linguistic database covering 3,000\+ language inventories. The default `Universal` level uses only phonemes present in ≥85% of those inventories, paired into consonant-onset \+ vowel-nucleus syllables. Two further safeguards keep the output pronounceable rather than just printable: consonant clusters obey the Sonority Sequencing Principle (so `tr` and `bl` appear but `tl` and `pt` do not), and a small set of vowel-plus-coda nuclei lets syllables close cleanly without producing the dense `C-C-C-C` runs that trigger articulatory suppression and break the phonological loop.
 
 ### Lossless
 
-Encoding and decoding are perfect inverses. Every byte value in your input maps to a unique syllable sequence, and every valid HCE string maps back to exactly one byte sequence. There is no approximation, no truncation, and no collision. If the bytes matter — and they always do for identifiers — HCE keeps them intact.
+Encoding and decoding are perfect inverses. The bytes-to-string mapping is a chained bijection: a mixed-radix expansion turns the input integer into syllable tokens, each step is invertible, and chunk separators are purely cosmetic — they are stripped before decoding so a user can paste the string with or without hyphens. There is no approximation, no truncation, and no collision. If the bytes matter — and they always do for identifiers — HCE keeps them intact.
 
 ## Supported Identifier Types
 
 HCE operates on raw bytes, so any identifier format works. The `hce-adapters` crate provides first-class support for the most common types:
 
 | Identifier | Size | Notes |
-|------------|------|-------|
+| --- | --- | --- |
 | UUID v4 / v7 | 128 bits | Standard random and time-ordered UUIDs |
 | ULID | 128 bits | Lexicographically sortable; use `Open` mode to preserve sort order |
 | Snowflake | 64 bits | Twitter/Discord-style IDs; set `bit_width(64)` |
@@ -53,10 +68,12 @@ HCE operates on raw bytes, so any identifier format works. The `hce-adapters` cr
 HCE ships with three operating modes. You choose the one that fits your use case:
 
 | Mode | Integrity | Encryption | Best For |
-|------|-----------|------------|----------|
+| --- | --- | --- | --- |
 | `Sealed` | HMAC-SHA256 | ✅ Full FPE | Opaque IDs in APIs, customer-facing tokens |
 | `Open` | HMAC-SHA256 | ✅ Full FPE | Sortable identifiers with timestamp prefix |
 | `Plain` | CRC | ❌ None | Human-readable display with error detection only |
+
+Both `Sealed` and `Open` fully encrypt the payload — including any embedded timestamp bits — through FPE. `Open` additionally exposes a short _derived_ prefix computed from the timestamp so internal logs sort chronologically; the body itself remains encrypted in both modes.
 
 ## Where to Go Next
 
@@ -64,12 +81,15 @@ HCE ships with three operating modes. You choose the one that fits your use case
   <Card title="Quickstart" icon="bolt" href="/quickstart">
     Encode and decode your first identifier in under five minutes with a working Rust example.
   </Card>
+
   <Card title="How It Works" icon="gear" href="/concepts/how-it-works">
     Understand the Feistel FPE cipher, syllable alphabet construction, and check syllable mechanics.
   </Card>
+
   <Card title="Modes" icon="sliders" href="/concepts/modes">
     Compare Sealed, Open, and Plain modes and learn which one belongs in your architecture.
   </Card>
+
   <Card title="Rust SDK" icon="code" href="/sdks/rust">
     Full API reference for hce-core, hce-adapters, and hce-fpe with configuration examples.
   </Card>
