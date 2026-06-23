@@ -12,6 +12,8 @@ A raw UUID like `0195e3a0-7c2e-7b41-8f3d-9a6c1e0b4d27` is difficult to communica
 
 The deeper problem is a mismatch between machines and people. Identifier domains grow without bound — more users, more events, more rows — but human short-term memory does not. Cowan's research on working memory shows that adults reliably hold only about 4±1 information chunks at a time. A 32-character hex UUID forces a listener to track ~28 unrelated chunks, far outside that limit, which is why phone numbers, credit cards, and product codes are universally broken into small grouped chunks instead.
 
+Every structural decision in HCE — the syllable shape, the chunk count, the alphabet size, the output length — is anchored to a specific result from cognitive psychology or information theory. If you want the reasoning in one place, see [Cognitive Foundations](/concepts/cognitive-foundations), which collects Cowan's 4±1 chunking limit, Baddeley's phonological loop, and Shannon's channel capacity into a single page that the rest of the documentation refers back to.
+
 HCE solves this by aligning the identifier's representation with how people actually read and remember strings:
 
 - **Phonemic, not hexadecimal.** Every syllable is a real consonant-vowel-(coda) shape that the [phonological loop](https://en.wikipedia.org/wiki/Working_memory) can rehearse internally. There is no `0`/`O` or `1`/`l` ambiguity because the alphabet does not include those symbols.
