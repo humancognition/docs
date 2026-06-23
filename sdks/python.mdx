@@ -1,5 +1,5 @@
 ---
-title: "HCE Python SDK: pip install hce Codec API Reference"
+title: "HCE Python SDK"
 sidebarTitle: "Python"
 description: "Install the HCE Python package via pip and encode binary identifiers into pronounceable strings. Native PyO3 extension with full builder API reference."
 ---
@@ -88,18 +88,18 @@ h = hce.Hce(
 
 Each method returns the `Hce` instance, so you can chain them in a builder pattern.
 
-| Method | Description |
-| --- | --- |
-| `with_bit_width(bits: int)` | Domain bit width (16–128) |
-| `with_modulus(n: int)` | Custom modulus domain (must be ≥ 2) |
+| Method | Description |  |
+| --- | --- | --- |
+| `with_bit_width(bits: int)` | Domain bit width (16–128) |  |
+| `with_modulus(n: int)` | Custom modulus domain (must be ≥ 2) |  |
 | \`with\_cipher(kind: str, key: bytes | None)\` | `"feistel"` (8-round HMAC-SHA256) or `"shuffle"` (4-round lightweight) |
 | \`with\_case("upper" | "lower")\` | Output case; default `"upper"` |
-| `with_check_syllables(n: int)` | HMAC check syllables 1–8; default `1` |
-| `with_separator(sep: str)` | Separator character between chunks; default `"-"` |
-| `with_chunk_none()` | No separator — contiguous output string |
-| `with_chunk_fixed(char_size: int)` | Fixed syllable count per chunk |
-| `with_chunk_pattern(pattern: list[int])` | Custom syllable-per-chunk pattern, e.g. `[3, 3, 4, 4]` |
-| `with_timestamp_config(epoch_ms: int, granularity: str)` | Timestamp prefix (`"open"` mode only) |
+| `with_check_syllables(n: int)` | HMAC check syllables 1–8; default `1` |  |
+| `with_separator(sep: str)` | Separator character between chunks; default `"-"` |  |
+| `with_chunk_none()` | No separator — contiguous output string |  |
+| `with_chunk_fixed(char_size: int)` | Fixed syllable count per chunk |  |
+| `with_chunk_pattern(pattern: list[int])` | Custom syllable-per-chunk pattern, e.g. `[3, 3, 4, 4]` |  |
+| `with_timestamp_config(epoch_ms: int, granularity: str)` | Timestamp prefix (`"open"` mode only) |  |
 
 <Note>
   `with_timestamp_config` accepts granularity strings: `"second"`, `"minute"`, `"hour"`, `"day"`, `"week"`, or `"month"`. It only has effect when the codec `mode` is `"open"`.

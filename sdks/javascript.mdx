@@ -1,5 +1,5 @@
 ---
-title: "HCE JavaScript SDK: npm install @humancognition/hce"
+title: "HCE JavaScript SDK"
 sidebarTitle: "JavaScript"
 description: "Install @humancognition/hce to encode binary identifiers into pronounceable strings from Node.js or the browser. Full WebAssembly API reference included."
 ---
@@ -96,18 +96,18 @@ new HceCodec(key: string | null, level: string, mode: string)
 
 Each method returns the `HceCodec` instance so you can chain them fluently.
 
-| Method | Description |
-| --- | --- |
+| Method | Description |  |  |  |
+| --- | --- | --- | --- | --- |
 | \`withBitWidth(32 | 64 | 96 | 128)\` | Domain bit width; default `128` |
-| `withDomainModulus(n: string)` | Custom modulus as a decimal string |
-| `withCase(uppercase: boolean)` | `true` = uppercase output (default); `false` = lowercase |
-| `withCheckSyllables(n: number)` | HMAC check syllables 1–8; default `1` |
-| `withSeparator(sep: string)` | Separator character between chunks; default `"-"` |
-| `withChunkNone()` | No separator — contiguous output string |
-| `withChunkFixed(charSize: number)` | Fixed syllable count per chunk |
-| `withChunkPattern(pattern: number[])` | Custom syllable-per-chunk pattern |
-| \`withCipher("feistel" | "shuffle", key?: string)\` | Cipher selection; `"feistel"` is the default 8-round HMAC-SHA256 cipher |
-| `withTimestampConfig(epochMs: number, gran: string)` | Timestamp prefix (`"open"` mode only) |
+| `withDomainModulus(n: string)` | Custom modulus as a decimal string |  |  |  |
+| `withCase(uppercase: boolean)` | `true` = uppercase output (default); `false` = lowercase |  |  |  |
+| `withCheckSyllables(n: number)` | HMAC check syllables 1–8; default `1` |  |  |  |
+| `withSeparator(sep: string)` | Separator character between chunks; default `"-"` |  |  |  |
+| `withChunkNone()` | No separator — contiguous output string |  |  |  |
+| `withChunkFixed(charSize: number)` | Fixed syllable count per chunk |  |  |  |
+| `withChunkPattern(pattern: number[])` | Custom syllable-per-chunk pattern |  |  |  |
+| \`withCipher("feistel" | "shuffle", key?: string)\` | Cipher selection; `"feistel"` is the default 8-round HMAC-SHA256 cipher |  |  |
+| `withTimestampConfig(epochMs: number, gran: string)` | Timestamp prefix (`"open"` mode only) |  |  |  |
 
 <Tip>
   Pass the same hex key to `withCipher` when you need to use a dedicated cipher key separate from the top-level codec key.
