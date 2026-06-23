@@ -1,5 +1,5 @@
 ---
-title: "HCE Rust SDK: hce-core API Reference"
+title: "HCE Rust SDK: hce-core Encrypted ID Codec Reference"
 sidebarTitle: "Rust"
 description: "Use hce-core, the canonical Rust crate, to encode and decrypt binary identifiers into pronounceable strings. Full API reference with builder configuration."
 ---
@@ -44,6 +44,7 @@ let hce = Hce::new(key: Option<&[u8]>, level: LanguageLevel, mode: HceMode);
 | `encode(&[u8])` | `String` | Encrypt and encode bytes to an HCE string |
 | `decode(&str)` | `Result<Vec<u8>, HceError>` | Decode and decrypt; returns `Err` on integrity failure |
 | `recover(&str)` | `Result<RecoveryResult, HceError>` | Attempt phoneme confusion correction |
+| `decode_corrected(&RecoveryResult)` | `Option<Vec<u8>>` | Decode a corrected result returned by `recover` |
 
 ### Configuration Methods
 
@@ -55,22 +56,23 @@ Chain these builder methods on your `Hce` instance before calling `encode`. Each
 | `with_modulus(u128)` | Use a custom modulus domain instead of bit width |
 | `with_case(HceCase)` | `HceCase::Upper` or `HceCase::Lower` (default `Upper`) |
 | `with_check_syllables(usize)` | HMAC check syllables 1–8 (default 1) |
-| `with_separator(char)` | Separator between chunks (default `'-'`) |
-| `with_chunk_none()` | No separator (contiguous string) |
-| `with_chunk_fixed(usize)` | Fixed syllable count per chunk |
-| `with_chunk_pattern(&[usize])` | Custom syllable-per-chunk pattern |
+| `with_chunk_spec(ChunkSpec)` | Chunk configuration — use `ChunkSpec::natural()`, `ChunkSpec::none()`, `ChunkSpec::fixed(n)`, or `ChunkSpec::pattern(&[...])` |
 | `with_timestamp_config(i64, TsGranularity)` | Enable timestamp prefix (Open mode only) |
 | `with_cipher(Arc<dyn Fpe>)` | Inject a custom format-preserving cipher |
+
+<Note>
+  Chunking is controlled through `ChunkSpec`. Use `ChunkSpec::natural()` (default, 5 chunks with `-` separator), `ChunkSpec::none()` (no separator), `ChunkSpec::fixed(n)` (fixed syllable count per chunk), or `ChunkSpec::pattern(&[3, 3, 4, 4])` (custom repeating pattern). Pass the result to `with_chunk_spec(...)`.
+</Note>
 
 ## Error Reference
 
 `HceError` is returned by `decode` and `recover` when the input cannot be processed.
 
 | Error | Meaning |
-|-------|---------|
+|-------|---------| 
 | `NormalizeError` | Input string could not be parsed or normalized |
 | `KeyRequired` | `Sealed` or `Open` mode used without a key |
-| `RecoveryNotSupported` | `recover` called but not available for this configuration |
+| `RecoveryNotSupported` | `recover` called on a `Plain`-mode codec |
 | `IntegrityFailure` | Check-syllable HMAC or CRC verification failed |
 
 ## Full Example
@@ -79,18 +81,19 @@ The example below encodes a raw 16-byte UUID, then round-trips it back through `
 
 ```rust
 use hce_core::{Hce, HceCase, HceMode, LanguageLevel, TsGranularity};
+use hce_core::chunk::ChunkSpec;
 
 fn main() {
     let key = b"32-byte-secret-key-here-xxxxxx!!";
     let hce = Hce::new(Some(key), LanguageLevel::Universal, HceMode::Sealed)
         .with_check_syllables(2)
         .with_case(HceCase::Lower)
-        .with_chunk_fixed(4);
+        .with_chunk_spec(ChunkSpec::fixed(4));
 
     let uuid_bytes = [0x01u8, 0x95, 0xe3, 0xa0, 0x7c, 0x2e, 0x7b, 0x41,
                       0x8f, 0x3d, 0x9a, 0x6c, 0x1e, 0x0b, 0x4d, 0x27];
     let encoded = hce.encode(&uuid_bytes);
     let decoded = hce.decode(&encoded).unwrap();
-    assert_eq!(decoded, uuid_bytes);
+    assert_eq!(decoded.as_slice(), &uuid_bytes);
 }
 ```

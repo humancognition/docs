@@ -74,14 +74,15 @@ let id = hce.encode(&original_bytes);
 let misheard = id.replace("BREFLAN", "BREFRAN"); // bl→br confusion
 
 // Attempt recovery
-match hce.recover(&misheard).unwrap() {
+let result = hce.recover(&misheard).unwrap();
+match &result {
     RecoveryResult::Ok => {
         // No error — string was already valid
         println!("No correction needed");
     }
-    RecoveryResult::Corrected(ref tokens) => {
+    RecoveryResult::Corrected(_) => {
         // Exactly one correction found — decode it
-        let recovered_bytes = hce.decode_corrected(tokens).unwrap();
+        let recovered_bytes = hce.decode_corrected(&result).unwrap();
         assert_eq!(recovered_bytes, original_bytes.to_vec());
         println!("Corrected and decoded successfully");
     }

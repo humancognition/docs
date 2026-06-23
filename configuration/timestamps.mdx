@@ -1,5 +1,5 @@
 ---
-title: "Embedding Timestamps in HCE Encoded Identifiers"
+title: "Embedding and Sorting Timestamps in HCE Identifiers"
 sidebarTitle: "Timestamps"
 description: "Use HCE's Open mode with timestamp configuration to produce lexicographically sortable encoded identifiers, ideal for distributed ID generation."
 ---
@@ -110,7 +110,7 @@ hce encode --mode open --timestamp-epoch 1700000000000 \
 ## UUID adapter and UUIDv7
 
 <Tip>
-When working with UUIDv7 identifiers, use the `UuidAdapter` from `hce-adapters` together with Open mode. The adapter automatically extracts the 48-bit millisecond timestamp embedded in the UUIDv7 structure, so HCE can use the identifier's own creation time as the prefix source — no separate `with_timestamp_config` call required.
+When working with UUIDv7 identifiers, use the `UuidAdapter` from `hce-adapters` together with Open mode. HCE automatically extracts the 48-bit millisecond timestamp embedded in the UUIDv7 bytes and uses the identifier's own creation time as the prefix source — no separate `with_timestamp_config` call required.
 </Tip>
 
 ```rust
@@ -123,7 +123,7 @@ let hce = Hce::new(
     HceMode::Open,
 );
 
-// UuidAdapter extracts the UUIDv7 timestamp automatically
+// UuidAdapter sets the correct bit width; HCE extracts the UUIDv7 timestamp automatically
 let codec = HceCodec::new(hce, UuidAdapter);
 
 let encoded = codec.encode(&uuid_v7_bytes);

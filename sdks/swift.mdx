@@ -1,5 +1,5 @@
 ---
-title: "HCE Swift SDK: Swift Package Manager Integration"
+title: "HCE Swift SDK: Swift Package for Encrypted Identifiers"
 sidebarTitle: "Swift"
 description: "Integrate the HCE Swift package via Swift Package Manager using C interop to encode and decode identifiers with a clean, chainable Swift API."
 ---
@@ -50,7 +50,7 @@ import Hce
 // .open   — timestamp-embedded, key required
 // .plain  — no encryption
 
-let h = HceCodec(key: Data?, level: Level, mode: Mode)
+guard let h = HceCodec(key: Data?, level: Level, mode: Mode) else { return }
 ```
 
 ### Core methods

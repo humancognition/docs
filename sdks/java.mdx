@@ -1,5 +1,5 @@
 ---
-title: "HCE Java SDK: JNA Bindings for Java and JVM"
+title: "HCE Java SDK: JNA Bindings for Encrypted Identifiers"
 sidebarTitle: "Java"
 description: "Use the HCE Java binding to encode and decode binary identifiers via JNA, with full Maven and Gradle support for any JVM-based project."
 ---
@@ -43,7 +43,7 @@ implementation 'net.java.dev.jna:jna:5.16.0'
 Import `HceCodec` and choose a level and mode constant before constructing the codec.
 
 ```java
-import com.github.humancognition.hce.HceCodec;
+import com.github.tmddn3070.hce.HceCodec;
 
 // Level constants
 // HceCodec.UNIVERSAL  (0) — full phoneme vocabulary
@@ -73,6 +73,9 @@ Each method mutates the codec in place and returns `this`, so you can chain call
 | Method | Description |
 |--------|-------------|
 | `withBitWidth(int bits)` | Set the domain bit width |
+| `withModulus(long modulus)` | Set a custom modulus domain |
+| `withCipherFeistel(byte[] key)` | Use the Feistel cipher with an optional separate key |
+| `withCipherShuffle()` | Use the Shuffle cipher |
 | `withCase(int caseVal)` | `HceCodec.CASE_UPPER` or `CASE_LOWER` |
 | `withCheckSyllables(int n)` | Append *n* check syllables (1–8) |
 | `withSeparator(char sep)` | Set the chunk separator character |
@@ -86,7 +89,7 @@ Each method mutates the codec in place and returns `this`, so you can chain call
 The example below encodes a UUID-shaped byte array and then decodes it back to verify the round-trip.
 
 ```java
-import com.github.humancognition.hce.HceCodec;
+import com.github.tmddn3070.hce.HceCodec;
 
 byte[] key  = "32-byte-secret-key-here-xxxxxx!!".getBytes();
 byte[] uuid = {1, -107, -29, -96, 124, 46, 123, 65, -113, 61, -102, 108, 30, 11, 77, 39};
@@ -102,7 +105,7 @@ try (HceCodec h = new HceCodec(key, HceCodec.UNIVERSAL, HceCodec.SEALED)) {
 ```
 
 <Warning>
-  `HceCodec` holds a native pointer to a Rust-allocated object. Always wrap it in a
+  `HceCodec` implements `AutoCloseable` and holds a native pointer to a Rust-allocated object. Always wrap it in a
   try-with-resources block, or call `close()` explicitly when you are finished. Failing
   to do so will leak native memory for the lifetime of the JVM process.
 </Warning>

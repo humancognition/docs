@@ -1,5 +1,5 @@
 ---
-title: "ULID, Snowflake, Xid, and ObjectId Adapters"
+title: "ULID, Snowflake, Xid, and ObjectId HCE Adapters"
 sidebarTitle: "ULID, Snowflake & Xid"
 description: "HCE adapters for ULID, Twitter/Discord Snowflakes, MongoDB ObjectIds, and Xid handle each format's byte layout and timestamp extraction out of the box."
 ---
@@ -8,7 +8,7 @@ Beyond UUIDs, HCE provides dedicated adapters for ULID, Twitter/Discord Snowflak
 
 <Tabs>
   <Tab title="ULID">
-    ULIDs are 128-bit identifiers encoded as 26-character Crockford base32 strings. The first 48 bits store a Unix millisecond timestamp, making ULIDs naturally sortable. `UlidAdapter` expects the raw 16-byte binary representation of a ULID — not the base32 string — and extracts the timestamp from the first 6 bytes.
+    ULIDs are 128-bit identifiers whose first 48 bits store a Unix millisecond timestamp, making them naturally sortable. `UlidAdapter` expects the raw 16-byte binary representation of a ULID — not the 26-character Crockford base32 string — and extracts the timestamp from the first 6 bytes.
 
     ```rust
     use hce_core::{Hce, HceMode, LanguageLevel};
@@ -47,8 +47,8 @@ Beyond UUIDs, HCE provides dedicated adapters for ULID, Twitter/Discord Snowflak
     use hce_core::{Hce, HceMode, LanguageLevel};
     use hce_adapters::{HceCodec, SnowflakeAdapter};
 
-    // Use SnowflakeAdapter::twitter() for the Twitter epoch (1288834974657 ms)
-    // Use SnowflakeAdapter::discord() for the Discord epoch (1420070400000 ms)
+    // Use SnowflakeAdapter::twitter() for the Twitter epoch (1_280_000_000_000 ms)
+    // Use SnowflakeAdapter::discord() for the Discord epoch (1_420_000_000_000 ms)
     // Use SnowflakeAdapter::new(epoch_ms) for a custom epoch
     let adapter = SnowflakeAdapter::twitter();
 
@@ -159,9 +159,9 @@ let decoded = codec.decode(&encoded).unwrap();
 ```
 
 <Note>
-  `RawAdapter::new(bits)` accepts any value from 16 to 128. Values above 128 are clamped to 128.
-  `RawAdapter` never extracts a timestamp, so `HceMode::Open` will not prepend a timestamp prefix
-  when you use it — use `Sealed` or `Plain` mode instead.
+  `RawAdapter::new(bits)` accepts any bit-width value up to 128. Values above 128 are clamped
+  to 128. `RawAdapter` never extracts a timestamp, so `HceMode::Open` will not prepend a
+  timestamp prefix when you use it — use `Sealed` or `Plain` mode instead.
 </Note>
 
 ## Installation

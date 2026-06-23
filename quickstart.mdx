@@ -46,7 +46,7 @@ This guide walks you through everything you need to encode your first identifier
     Instantiate `Hce` with a 32-byte secret key, a language level, and an operating mode. The `Sealed` mode encrypts the identifier fully and attaches an HMAC check syllable — the right choice for most production use cases.
 
     ```rust
-    use hce_core::{Hce, HceMode, LanguageLevel};
+    use hce_core::{ChunkSpec, Hce, HceCase, HceMode, LanguageLevel};
 
     let hce = Hce::new(
         Some(b"32-byte-secret-key-here-xxxxxx!!"),
@@ -70,7 +70,7 @@ This guide walks you through everything you need to encode your first identifier
     // => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
     ```
 
-    The output is uppercase by default. You can call `.with_case(HceCase::Lower)` on the codec to get lowercase, or `.with_separator('/')` to change the chunk delimiter.
+    The output is uppercase by default. You can call `.with_case(HceCase::Lower)` on the codec to get lowercase, or `.with_chunk_spec(ChunkSpec::natural_with_separator('/'))` to change the chunk delimiter.
 
   </Step>
 

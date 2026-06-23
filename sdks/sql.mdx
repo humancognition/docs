@@ -1,5 +1,5 @@
 ---
-title: "HCE MySQL UDF: Encode Identifiers in SQL Queries"
+title: "HCE MySQL UDF: Encode and Decode IDs in SQL Queries"
 sidebarTitle: "SQL"
 description: "Install the HCE MySQL and MariaDB UDFs to encode and decode binary identifier columns directly inside SQL queries without application-layer code."
 ---
@@ -11,9 +11,11 @@ HCE provides MySQL and MariaDB user-defined functions (UDFs) so you can encode a
 Compile the UDF shared library against your MySQL installation and the pre-built `hce-ffi` release artifact, then copy it to the MySQL plugin directory.
 
 ```bash
-cc -shared -fPIC -I $(mysql_config --include) \
+cc -shared -fPIC \
+   -I $(mysql_config --include) \
+   -I path/to/hce/crates/hce-ffi \
    -o libhce_udf.so hce_udf.c \
-   -L ../../target/release -lhce_ffi
+   -L path/to/hce/target/release -lhce_ffi
 cp libhce_udf.so $(mysql_config --plugindir)/
 ```
 

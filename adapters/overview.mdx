@@ -1,5 +1,5 @@
 ---
-title: "HCE Adapters: Encode Typed Identifiers Directly"
+title: "HCE Adapters: Encode Any Typed Identifier Directly"
 sidebarTitle: "Overview"
 description: "hce-adapters provides type-specific wrappers for UUID, ULID, Snowflake, ObjectId, and Xid so you can encode identifiers without manual byte wrangling."
 ---
@@ -11,7 +11,7 @@ The `hce-adapters` crate provides type-specific wrappers — called adapters —
 | Adapter | Type | Notes |
 |---|---|---|
 | `UuidAdapter` | UUID (v1, v4, v6, v7) | Extracts timestamp from v1/v6/v7 |
-| `UlidAdapter` | ULID | 26-char base32 → 128-bit |
+| `UlidAdapter` | ULID | 128-bit; pass raw 16-byte binary form |
 | `SnowflakeAdapter` | Snowflake (Twitter/Discord style) | 64-bit integer |
 | `ObjectIdAdapter` | MongoDB ObjectId | 12-byte |
 | `XidAdapter` | Xid | 12-byte |
@@ -60,7 +60,7 @@ pub trait Adapter: Send + Sync {
 
 | Method | Purpose |
 |---|---|
-| `bit_width` | The canonical bit width of the identifier (16–128). Used to configure the codec. |
+| `bit_width` | The canonical bit width of the identifier (up to 128). Used to configure the codec. |
 | `to_bytes` | Normalises raw input bytes into a fixed-length buffer before encoding. |
 | `parse_bytes` | Post-processes decoded bytes back into the identifier's native representation. |
 | `has_timestamp` | Returns `true` when the identifier embeds a sortable timestamp. |

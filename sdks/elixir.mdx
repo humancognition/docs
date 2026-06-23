@@ -39,6 +39,7 @@ Hce.new(key, level \\ :universal, mode \\ :sealed)
 ```elixir
 Hce.encode(codec, data :: binary) :: String.t()
 Hce.decode(codec, input :: String.t()) :: {:ok, binary} | {:error, term}
+Hce.recover(codec, input :: String.t()) :: {:ok, binary} | {:error, term}
 ```
 
 ### Configuration functions
@@ -47,9 +48,15 @@ All configuration functions accept the codec as the first argument and return th
 
 ```elixir
 Hce.with_bit_width(codec, bits :: integer)
+Hce.with_modulus(codec, modulus :: integer)
+Hce.with_cipher_feistel(codec, key :: binary | nil)
+Hce.with_cipher_shuffle(codec)
 Hce.with_case(codec, :upper | :lower)
+Hce.with_check_syllables(codec, n :: integer)
 Hce.with_separator(codec, sep :: String.t())
 Hce.with_chunk_none(codec)
+Hce.with_chunk_fixed(codec, n :: integer)
+Hce.with_chunk_pattern(codec, pattern :: [integer])
 Hce.with_timestamp_config(codec, epoch_ms :: integer, :second | :minute | :hour | :day | :week | :month)
 ```
 

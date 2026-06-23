@@ -1,5 +1,5 @@
 ---
-title: "HCE CLI Command and Flag Reference"
+title: "HCE CLI Command and Flag Reference for Encode and Decode"
 sidebarTitle: "Commands"
 description: "Complete reference for all hce CLI commands — encode, decode, and recover — with every flag, its type, default value, and a practical usage example."
 ---
@@ -14,12 +14,12 @@ The `hce` CLI provides three primary commands — `encode`, `decode`, and `recov
   | Flag | Short | Type | Default | Description |
   |------|-------|------|---------|-------------|
   | `--key` | `-k` | string (hex) | none | Encryption key — required for `sealed` and `open` modes |
-  | `--level` | `-l` | `universal` / `eu` / `en` / `numeric` | `universal` | Phoneme language level used for syllable generation |
-  | `--mode` | `-m` | `sealed` / `open` / `plain` | `sealed` | Encryption mode: `sealed` = full confidentiality, `open` = sortable timestamp-prefixed, `plain` = CRC only |
+  | `--level` | `-l` | `universal` (`u`) / `eu` (`e`) / `en` / `numeric` (`n`) | `universal` | Phoneme language level used for syllable generation |
+  | `--mode` | `-m` | `sealed` (`s`) / `open` (`o`) / `plain` (`p`) | `sealed` | Encryption mode: `sealed` = full confidentiality, `open` = sortable timestamp-prefixed, `plain` = CRC only |
   | `--bits` | `-w` | u32 | `128` | Bit width of the encoded value (16–128) |
   | `--modulus` | — | u128 | none | Custom domain modulus; overrides `--bits` when set |
   | `--cipher` | — | `feistel` / `shuffle` | none | Override the default cipher (Feistel 8-round) |
-  | `--case` | — | `upper` / `lower` | `upper` | Output case for the HCE string |
+  | `--case` | — | `upper` / `lower` | none | Force output case for the HCE string; omit to use the library default |
   | `--check-syllables` | — | usize | `1` | Number of HMAC check syllables appended for integrity |
   | `--separator` | — | char | `-` | Character used to separate syllable chunks |
   | `--chunk-none` | — | flag | off | Disable chunking entirely — output is one continuous string |
@@ -50,13 +50,13 @@ The `hce` CLI provides three primary commands — `encode`, `decode`, and `recov
   | Flag | Short | Type | Default | Description |
   |------|-------|------|---------|-------------|
   | `--key` | `-k` | string (hex) | none | Encryption key — required for `sealed` and `open` modes |
-  | `--level` | `-l` | `universal` / `eu` / `en` / `numeric` | `universal` | Must match the level used at encode time |
-  | `--mode` | `-m` | `sealed` / `open` / `plain` | `sealed` | Must match the mode used at encode time |
+  | `--level` | `-l` | `universal` (`u`) / `eu` (`e`) / `en` / `numeric` (`n`) | `universal` | Must match the level used at encode time |
+  | `--mode` | `-m` | `sealed` (`s`) / `open` (`o`) / `plain` (`p`) | `sealed` | Must match the mode used at encode time |
   | `--bits` | `-w` | u32 | `128` | Bit width — must match the value used at encode time |
   | `--modulus` | — | u128 | none | Custom domain modulus — must match if used at encode time |
   | `--cipher` | — | `feistel` / `shuffle` | none | Override the default cipher — must match if used at encode time |
   | `--check-syllables` | — | usize | `1` | Number of HMAC check syllables — must match encode value |
-  | `[input]` | — | string (HCE) | required | The HCE string to decode |
+  | `<input>` | — | string (HCE) | required | The HCE string to decode |
 
   ```bash
   hce decode --key <hex> "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN"
@@ -70,10 +70,10 @@ The `hce` CLI provides three primary commands — `encode`, `decode`, and `recov
   | Flag | Short | Type | Default | Description |
   |------|-------|------|---------|-------------|
   | `--key` | `-k` | string (hex) | none | Encryption key — required for `sealed` and `open` modes |
-  | `--level` | `-l` | `universal` / `eu` / `en` / `numeric` | `universal` | Must match the level used at encode time |
-  | `--mode` | `-m` | `sealed` / `open` / `plain` | `sealed` | Must match the mode used at encode time |
+  | `--level` | `-l` | `universal` (`u`) / `eu` (`e`) / `en` / `numeric` (`n`) | `universal` | Must match the level used at encode time |
+  | `--mode` | `-m` | `sealed` (`s`) / `open` (`o`) / `plain` (`p`) | `sealed` | Must match the mode used at encode time |
   | `--bits` | `-w` | u32 | `128` | Bit width — must match the value used at encode time |
-  | `[input]` | — | string (HCE) | required | The potentially misheard or mistyped HCE string |
+  | `<input>` | — | string (HCE) | required | The potentially misheard or mistyped HCE string |
 
   ```bash
   hce recover --key <hex> "PETREN-NISLORPEM-LAFLER-SRORGULGOLFUN-PREPLEN"

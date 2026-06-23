@@ -1,5 +1,5 @@
 ---
-title: "How HCE Encodes and Encrypts Binary Identifiers"
+title: "How HCE Encodes and Encrypts Your Binary Identifiers"
 sidebarTitle: "How It Works"
 description: "HCE transforms binary identifiers into pronounceable strings through format-preserving encryption, a phoneme mapping, and HMAC-SHA256 integrity checks."
 ---
@@ -13,9 +13,9 @@ When you call `hce.encode()`, HCE takes your raw bytes, encrypts them in-place u
     Your input bytes are loaded into a 128-bit integer (or a smaller domain if you call `with_bit_width()` or `with_modulus()`). If you pass fewer bytes than the domain requires, the buffer is zero-padded. Every value in the domain has exactly one corresponding HCE string — the mapping is bijective.
   </Step>
   <Step title="Format-preserving encryption (FPE) is applied">
-    HCE runs a Feistel network with **8 rounds** using **HMAC-SHA256** as the round function. The cipher operates entirely within the configured domain — the encrypted value is always a valid integer in the same range as the plaintext. This is what makes the encoding format-preserving: bit-width in, same bit-width out.
+    HCE applies a format-preserving encryption cipher keyed by your secret key. The cipher operates entirely within the configured domain — the encrypted value is always a valid integer in the same range as the plaintext. This is what makes the encoding format-preserving: bit-width in, same bit-width out.
 
-    The Feistel network is keyed by your secret key and a four-byte **tweak** that encodes the language level, mode, and domain width. Two codecs with different levels or modes will produce different output even for the same key and input.
+    The cipher is parameterised by your key, the language level, the mode, and the domain width. Two codecs configured with different levels or modes will produce different output even for the same key and input.
   </Step>
   <Step title="Encrypted integer maps to phonemic syllables">
     The encrypted integer is converted to a sequence of syllable tokens using a mixed-radix encoding. Each syllable consists of:

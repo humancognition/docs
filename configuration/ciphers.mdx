@@ -1,7 +1,7 @@
 ---
-title: "HCE Cipher Selection and Custom FPE Injection"
+title: "HCE Cipher Selection and Custom FPE Cipher Injection"
 sidebarTitle: "Ciphers"
-description: "Choose between the built-in Feistel and Shuffle ciphers, or inject your own format-preserving encryption implementation into the HCE pipeline."
+description: "Choose between the built-in Feistel8 and Shuffle4 ciphers, or inject your own format-preserving encryption implementation into the HCE pipeline."
 ---
 
 HCE uses format-preserving encryption (FPE) internally so that ciphertext stays within the same numeric domain as the plaintext — which is what makes the codec both reversible and consistently sized. You can choose between two built-in ciphers shipped with `hce-fpe`, or supply your own implementation by injecting any type that satisfies the `Fpe` trait. This page explains each option and when to reach for it.
@@ -10,19 +10,19 @@ HCE uses format-preserving encryption (FPE) internally so that ciphertext stays 
 
 | Cipher | Kind | Rounds | Notes |
 |---|---|---|---|
-| Feistel | HMAC-SHA256 | 8 | Default; strong cryptographic security; requires a key |
-| Shuffle | Lightweight | 4 | Faster; no key; structural permutation only — not cryptographically secure |
+| Feistel8 | HMAC-SHA256 | 8 | Default; strong cryptographic security; requires a key |
+| Shuffle4 | Lightweight | 4 | Faster; no key; structural permutation only — not cryptographically secure |
 
-### Feistel (default)
+### Feistel8 (default)
 
-The Feistel cipher runs 8 rounds of HMAC-SHA256. It is the default when you construct `Hce` with a key, so you do not need to configure it explicitly. You can also select it explicitly via `hce_fpe::build_cipher`.
+The Feistel8 cipher runs 8 rounds of HMAC-SHA256. It is the default when you construct `Hce` with a key, so you do not need to configure it explicitly. You can also select it explicitly via `hce_fpe::build_cipher`.
 
 <CodeGroup>
 
 ```rust Implicit (recommended)
 use hce_core::{Hce, HceMode, LanguageLevel};
 
-// Feistel is used automatically when a key is provided
+// Feistel8 is used automatically when a key is provided
 let hce = Hce::new(
     Some(b"32-byte-secret-key-here-xxxxxx!!"),
     LanguageLevel::Universal,
@@ -31,9 +31,8 @@ let hce = Hce::new(
 ```
 
 ```rust Explicit selection
-use hce_core::{Domain, Hce, HceMode, LanguageLevel};
+use hce_core::{Hce, HceMode, LanguageLevel};
 use hce_fpe::{build_cipher, CipherKind};
-use std::sync::Arc;
 
 let key = b"32-byte-secret-key-here-xxxxxx!!";
 
@@ -46,16 +45,16 @@ let hce = hce.with_cipher(cipher);
 
 </CodeGroup>
 
-### Shuffle
+### Shuffle4
 
-The Shuffle cipher applies 4 rounds of deterministic domain-preserving permutation. It does not accept a key.
+The Shuffle4 cipher applies 4 rounds of deterministic domain-preserving permutation. It does not accept a key.
 
 <Warning>
-Shuffle mode does not use a key and provides only structural shuffling — it is **not** cryptographically secure. Use it only with `Plain` mode, for non-sensitive identifiers, or in contexts where confidentiality is not required.
+Shuffle4 does not use a key and provides only structural shuffling — it is **not** cryptographically secure. Use it only with `Plain` mode, for non-sensitive identifiers, or in contexts where confidentiality is not required.
 </Warning>
 
 ```rust
-use hce_core::{Domain, Hce, HceMode, LanguageLevel};
+use hce_core::{Hce, HceMode, LanguageLevel};
 use hce_fpe::{build_cipher, CipherKind};
 
 let mut hce = Hce::new(None, LanguageLevel::Universal, HceMode::Plain);
@@ -90,7 +89,7 @@ The `tweak` slice carries domain metadata (level byte, mode byte, domain width) 
 Wrap your implementation in an `Arc` and pass it to `with_cipher`.
 
 ```rust
-use hce_core::{Domain, Fpe, Hce, HceMode, LanguageLevel};
+use hce_core::{Fpe, Hce, HceMode, LanguageLevel};
 use std::sync::Arc;
 
 struct MyCipher {
@@ -128,13 +127,13 @@ Custom cipher injection is only available through the Rust API. Language binding
 The `hce` CLI accepts a `--cipher` flag on both `encode` and `decode` subcommands.
 
 ```bash
-# Encode with the Feistel cipher (explicit)
+# Encode with the Feistel8 cipher (explicit)
 hce encode --cipher feistel --key <hex-key> <hex-input>
 
-# Encode with the Shuffle cipher
+# Encode with the Shuffle4 cipher
 hce encode --cipher shuffle <hex-input>
 
-# Decode with the Feistel cipher
+# Decode with the Feistel8 cipher
 hce decode --cipher feistel --key <hex-key> <hce-string>
 ```
 
@@ -143,14 +142,14 @@ hce decode --cipher feistel --key <hex-key> <hce-string>
 ```python
 import hce
 
-# Feistel (explicit)
+# Feistel8 (explicit)
 h = hce.Hce(
     key=b"32-byte-secret-key-here-xxxxxx!!",
     level="universal",
     mode="sealed",
 ).with_cipher("feistel")
 
-# Shuffle (no key needed)
+# Shuffle4 (no key needed)
 h_shuffle = hce.Hce(
     level="universal",
     mode="plain",

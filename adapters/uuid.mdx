@@ -1,5 +1,5 @@
 ---
-title: "Encoding UUIDs with HCE UuidAdapter"
+title: "Losslessly Encode UUIDs and Sort by Timestamp with HCE"
 sidebarTitle: "UUID"
 description: "UuidAdapter encodes UUID v1, v4, v6, and v7 with HCE and extracts the embedded timestamp from v1, v6, and v7 to produce lexicographically sortable output."
 ---
@@ -29,8 +29,6 @@ let uuid_bytes: [u8; 16] = [
 ];
 
 let encoded = codec.encode(&uuid_bytes);
-// => "PETREN-NISLORPEN-LAFLER-SRORGULGOLFUN-PREPLEN" (example)
-
 let decoded = codec.decode(&encoded).unwrap();
 assert_eq!(&decoded[..16], &uuid_bytes[..]);
 ```

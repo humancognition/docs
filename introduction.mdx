@@ -44,7 +44,8 @@ HCE operates on raw bytes, so any identifier format works. The `hce-adapters` cr
 | UUID v4 / v7 | 128 bits | Standard random and time-ordered UUIDs |
 | ULID | 128 bits | Lexicographically sortable; use `Open` mode to preserve sort order |
 | Snowflake | 64 bits | Twitter/Discord-style IDs; set `bit_width(64)` |
-| Xid | 96 bits | MongoDB ObjectId-compatible; set `bit_width(96)` |
+| MongoDB ObjectId | 96 bits | 12-byte BSON ObjectId; use `ObjectIdAdapter` |
+| Xid | 96 bits | rs/xid 12-byte IDs; use `XidAdapter` |
 | Arbitrary bytes | 16–128 bits | Any fixed-width identifier in the supported range |
 
 ## Modes at a Glance
